@@ -217,26 +217,51 @@ The project follows a UI-first development approach (see `docs/development_phase
   - `feature/phase-10-testing`
 - **hotfix/***: Emergency fixes for production issues
 
-### Pre-Push Requirements
-Always ensure the following passes before pushing:
+### Pre-Commit Requirements
+Always ensure the following passes before committing:
 
 **Frontend (web/):**
 ```bash
 cd web
+# 1. Format code with Prettier
+npx prettier --write .
+
+# 2. Run linting checks
 npm run lint        # ESLint checks must pass
-npm run type-check  # TypeScript compilation must succeed
+
+# 3. Type checking
+npx tsc --noEmit    # TypeScript compilation must succeed
+
+# 4. Run tests (when available)
 npm run test        # All unit tests must pass
+
+# 5. Build verification (optional for commit, required for deploy)
 npm run build       # Production build must succeed
 ```
 
 **Backend (api/):**
 ```bash
 cd api
+# 1. Format code
+black .             # Auto-format Python code
+isort .             # Sort imports
+
+# 2. Check formatting and linting
 black --check .     # Code formatting must be correct
 isort --check-only . # Import sorting must be correct
 mypy .              # Type checking must pass
+
+# 3. Run tests
 pytest              # All tests must pass
 ```
+
+### Commit Process
+1. **Stop development server** if running in background
+2. **Run all pre-commit checks** as listed above
+3. **Stage changes**: `git add .`
+4. **Create commit** with proper message format
+5. **Switch to develop** and merge feature branch
+6. **Create new feature branch** for next phase
 
 ### Commit Message Format
 Follow conventional commits:
