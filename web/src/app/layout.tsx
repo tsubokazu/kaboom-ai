@@ -28,7 +28,7 @@ export default function RootLayout({
   return (
     <html lang="ja">
       <body
-        className="min-h-screen"
+        className={`${geistSans.variable} ${geistMono.variable} min-h-screen`}
         style={{ background: "var(--kb-bg-canvas)", color: "var(--kb-text)" }}
       >
         <ClientProvider>

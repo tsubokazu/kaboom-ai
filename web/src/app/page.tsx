@@ -14,6 +14,21 @@ import {
 import { Badge, Pill } from "@/components/ui";
 
 // Mock data helpers
+// 型定義
+type StockRow = {
+  code: string;
+  name: string;
+  price: number;
+  change: number;
+  ai: "BUY" | "SELL" | "HOLD";
+  confidence: number;
+  updatedAt: Date;
+};
+
+type FlashState = {
+  t?: number;
+};
+
 const makeChartData = () =>
   Array.from({ length: 40 }).map((_, i) => ({
     t: i,
@@ -21,7 +36,7 @@ const makeChartData = () =>
     bench: 100 + Math.cos(i / 4) * 4,
   }));
 
-const initialRows = [
+const initialRows: StockRow[] = [
   {
     code: "7203",
     name: "トヨタ",
@@ -243,8 +258,8 @@ function RealtimeTable() {
   const [sortKey, setSortKey] = useState("updatedAt");
   const [dir, setDir] = useState("desc");
   const [filter, setFilter] = useState("ALL");
-  const [modal, setModal] = useState<any>(null);
-  const [flash, setFlash] = useState<any>({});
+  const [modal, setModal] = useState<StockRow | null>(null);
+  const [flash, setFlash] = useState<FlashState>({});
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
@@ -258,8 +273,8 @@ function RealtimeTable() {
           const delta = (Math.random() - 0.5) * 2;
           const newPrice = Math.max(1, r.price + delta);
           const newChange = (Math.random() - 0.5) * 2;
-          const aiStates = ["BUY", "SELL", "HOLD"];
-          const flip =
+          const aiStates: StockRow["ai"][] = ["BUY", "SELL", "HOLD"];
+          const flip: StockRow["ai"] =
             Math.random() < 0.05
               ? aiStates[Math.floor(Math.random() * 3)]
               : r.ai;
@@ -282,8 +297,8 @@ function RealtimeTable() {
     let d = [...rows];
     if (filter !== "ALL") d = d.filter((r) => r.ai === filter);
     d.sort((a, b) => {
-      const va = (a as any)[sortKey];
-      const vb = (b as any)[sortKey];
+      const va = a[sortKey as keyof StockRow];
+      const vb = b[sortKey as keyof StockRow];
       const s = va > vb ? 1 : va < vb ? -1 : 0;
       return dir === "asc" ? s : -s;
     });
