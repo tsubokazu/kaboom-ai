@@ -65,7 +65,7 @@ export function generateMockPriceData(_symbol: string, days: number = 90): Price
   return data;
 }
 
-export function generateMockAIData(_symbol: string): {
+export function generateMockAIData(symbol: string): {
   decision: AIDecision;
   technicalIndicators: Record<string, TechnicalIndicator>;
   marketSentiment: {
@@ -186,7 +186,7 @@ function generateReasoning(signal: 'BUY' | 'SELL' | 'HOLD'): string[] {
   return reasons.sort(() => 0.5 - Math.random()).slice(0, count);
 }
 
-function generateRisks(_signal: 'BUY' | 'SELL' | 'HOLD'): string[] {
+function generateRisks(signal: 'BUY' | 'SELL' | 'HOLD'): string[] {
   const risks = [
     '急激な市場変動の可能性',
     '決算発表による影響',
