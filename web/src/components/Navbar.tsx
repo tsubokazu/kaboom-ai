@@ -33,7 +33,7 @@ export default function Navbar() {
 
   const nav = [
     { href: "/", label: "ダッシュボード" },
-    { href: "/ai", label: "AI分析" },
+    { href: "/ai-analysis", label: "AI分析" },
     { href: "/backtest", label: "バックテスト" },
     { href: "/admin", label: "管理" },
   ];
