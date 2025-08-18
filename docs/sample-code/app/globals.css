@@ -1,13 +1,6 @@
-@import "tailwindcss";
-
-@theme {
-  --color-brand: #F66B0E;
-  --color-brand-hover: #EA580C;
-  --color-brand-pressed: #C2410C;
-  --color-success: #16A34A;
-  --color-error: #DC2626;
-  --animate-flash: flash 0.3s ease-out;
-}
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
 
 /* Design tokens (CSS variables) */
 :root {
@@ -60,36 +53,35 @@
 
 html, body { height: 100%; }
 body { background: var(--kb-bg-canvas); color: var(--kb-text); }
-
 /* Tailwind components using @apply for common patterns */
 @layer components {
   .kb-container { @apply max-w-[1280px] mx-auto p-6; }
 
   /* Buttons */
   .kb-btn { @apply inline-flex items-center justify-center gap-2 h-10 px-4 font-semibold rounded-full whitespace-nowrap; }
-  .kb-btn-primary { @apply text-white; background: var(--kb-brand); }
-  .kb-btn-secondary { @apply bg-transparent; color: var(--kb-text); border: 1px solid var(--kb-border-strong); }
+  .kb-btn-primary { @apply text-white bg-brand; }
+  .kb-btn-secondary { @apply text-text border border-borderStrong bg-transparent; }
   .kb-flash { @apply animate-flash; }
 
   /* Nav link */
   .kb-nav-link { @apply rounded-full px-3 py-2; }
-  .kb-nav-link.active { color: var(--kb-brand); background: rgba(246,107,14,0.1); }
+  .kb-nav-link.active { @apply text-brand; background: rgba(246,107,14,0.1); }
 
   /* Cards, inputs, badges */
-  .kb-card { @apply rounded-[24px] shadow-[0_4px_12px_rgba(0,0,0,0.10)]; background: var(--kb-bg-surface); border: 1px solid var(--kb-border); }
-  .kb-input { @apply h-11 rounded-[16px] px-3; background: var(--kb-bg-surface); border: 1px solid var(--kb-border); color: var(--kb-text); }
+  .kb-card { @apply bg-surface border border-border rounded-[24px] shadow-[0_4px_12px_rgba(0,0,0,0.10)]; }
+  .kb-input { @apply h-11 border border-border rounded-[16px] px-3 bg-surface text-text; }
   .kb-badge { @apply rounded-full py-[2px] px-[10px] text-xs font-bold text-white; }
   .badge-buy { @apply bg-[#16A34A]; }
   .badge-sell { @apply bg-[#DC2626]; }
   .badge-hold { @apply bg-[#6B7280]; }
 
   /* Table */
-  .kb-table th { @apply font-bold text-sm; background: var(--kb-bg-elevated); border-bottom: 1px solid var(--kb-border); }
-  .kb-table td { border-bottom: 1px solid var(--kb-border); }
+  .kb-table th { @apply border-b border-border bg-elevated font-bold text-sm; }
+  .kb-table td { @apply border-b border-border; }
 
   /* Pills */
-  .kb-pill { @apply rounded-full px-3 py-[6px] cursor-pointer inline-flex items-center gap-[6px] whitespace-nowrap; border: 1px solid var(--kb-border); }
-  .kb-pill.active { background: var(--kb-brand); border: 1px solid var(--kb-brand); color: var(--kb-on-brand); }
+  .kb-pill { @apply rounded-full border border-border px-3 py-[6px] cursor-pointer inline-flex items-center gap-[6px] whitespace-nowrap; }
+  .kb-pill.active { @apply bg-brand border-brand; color: var(--kb-on-brand); }
 
   /* Modal */
   .kb-modal-backdrop { @apply fixed inset-0 bg-black/40 flex items-center justify-center; }
@@ -97,15 +89,10 @@ body { background: var(--kb-bg-canvas); color: var(--kb-text); }
 
   /* Misc */
   .kb-ws-dot { @apply w-[10px] h-[10px] rounded-full; }
-  .kb-frame { @apply rounded-[24px]; border: 2px solid var(--kb-border-strong); }
+  .kb-frame { @apply border-2 border-borderStrong rounded-[24px]; }
 }
 
 /* keep a few non-apply rules using CSS variables */
 .kb-btn-primary:hover { background: var(--kb-brand-hover); }
 .kb-btn-secondary:hover { background: rgba(246,107,14,0.08); }
 .kb-table tbody tr:last-child td { border-bottom: none; }
-
-@keyframes flash {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.5; }
-}

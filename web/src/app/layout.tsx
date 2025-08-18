@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
-import "@/styles/globals.css";
+import "./globals.css";
+import Navbar from "@/components/Navbar";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -25,10 +26,12 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="ja">
-      <body
-        className={`${geistSans.variable} ${geistMono.variable} antialiased`}
-      >
+      <body className="min-h-screen" style={{ background: "var(--kb-bg-canvas)", color: "var(--kb-text)" }}>
+        <Navbar />
         {children}
+        <footer className="kb-container mt-10 pb-8 text-sm" style={{ color: "var(--kb-text-muted)" }}>
+          © 2025 Kaboom.ai — Sample UI built from the design system
+        </footer>
       </body>
     </html>
   );

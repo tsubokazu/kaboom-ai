@@ -11,9 +11,35 @@ import {
   Tooltip,
   Line,
 } from "recharts";
-import { Badge, Pill } from "@/components/ui";
 
-// Mock data helpers
+// -------------------------------------------------------------
+// Kaboom.ai — Next.js + Tailwind migration
+// Single-file page component. Uses Tailwind utilities + CSS variables.
+// -------------------------------------------------------------
+
+// theme variables are now handled by css and Navbar's theme toggle
+
+// simple inline SVG mascot
+const Mascot = ({ size = 28 }) => (
+  <svg width={size} height={size} viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <circle cx="32" cy="32" r="28" fill="url(#g)" stroke="var(--kb-illustration-stroke)" strokeWidth="2"/>
+    <defs>
+      <linearGradient id="g" x1="8" y1="8" x2="56" y2="56" gradientUnits="userSpaceOnUse">
+        <stop stopColor="#FB923C"/>
+        <stop offset="1" stopColor="#F66B0E"/>
+      </linearGradient>
+    </defs>
+    <rect x="22" y="14" width="20" height="6" rx="2" fill="#fff" opacity="0.8"/>
+    <circle cx="24" cy="28" r="4" fill="#fff"/>
+    <circle cx="40" cy="28" r="4" fill="#fff"/>
+    <rect x="22" y="36" width="20" height="8" rx="4" fill="#fff"/>
+  </svg>
+);
+
+// minimal icons (no external icon lib)
+// icons are centralized in components for other routes
+
+// demo data helpers
 const makeChartData = () => Array.from({ length: 40 }).map((_, i) => ({
   t: i,
   asset: 100 + Math.sin(i / 3) * 6 + Math.random() * 3,
@@ -27,6 +53,15 @@ const initialRows = [
   { code: "6954", name: "ファナック", price: 46450, change: +0.2, ai: "BUY", confidence: 0.71, updatedAt: new Date() },
   { code: "8306", name: "三菱UFJ", price: 1518, change: -0.3, ai: "HOLD", confidence: 0.49, updatedAt: new Date() }
 ];
+
+function useTheme() {
+  const [mode, setMode] = useState("light");
+  useEffect(() => {
+    const root = document.documentElement;
+    root.classList.toggle('dark', mode === 'dark');
+  }, [mode]);
+  return { mode, setMode };
+}
 
 function useRealtimeNumbers() {
   const [total, setTotal] = useState(12034567);
@@ -46,15 +81,34 @@ function useRealtimeNumbers() {
   return { total, today, monthly, winRate };
 }
 
-function formatCurrency(n: number) {
+function formatCurrency(n) {
   return n.toLocaleString("ja-JP", { style: "currency", currency: "JPY", maximumFractionDigits: 0 });
 }
 
-function pct(n: number) { return `${(n * 100).toFixed(1)}%`; }
+function pct(n) { return `${(n * 100).toFixed(1)}%`; }
+
+// minimal runtime self-tests (console only)
+function runSelfTests() {
+  const results = [];
+  const assert = (name, cond) => results.push({ name, pass: !!cond });
+  assert("formatCurrency includes yen sign", /[¥￥]/.test(formatCurrency(1000)));
+  assert("pct formats 0.5 => 50.0%", pct(0.5) === "50.0%");
+  assert("CSS brand color exists", Boolean(getComputedStyle(document.documentElement).getPropertyValue('--kb-brand')));
+  console.table(results);
+  return results.every(r => r.pass);
+}
+
+function Pill({ active, children, onClick }) {
+  return (
+    <button className={`kb-pill ${active ? "active" : ""}`} onClick={onClick}>{children}</button>
+  );
+}
+
+// Navbar moved to components/navbar and rendered in app/layout.jsx
 
 function SummaryCards() {
   const { total, today, monthly, winRate } = useRealtimeNumbers();
-  const Item = ({ label, value, sub }: { label: string; value: string; sub?: { text: string; color: string } }) => (
+  const Item = ({ label, value, sub }) => (
     <div className="kb-card p-6">
       <div className="text-sm" style={{ color: "var(--kb-text-muted)" }}>{label}</div>
       <div className="mt-2 text-2xl font-extrabold" style={{ color: "var(--kb-text)" }}>{value}</div>
@@ -136,8 +190,8 @@ function RealtimeTable() {
   const [sortKey, setSortKey] = useState("updatedAt");
   const [dir, setDir] = useState("desc");
   const [filter, setFilter] = useState("ALL");
-  const [modal, setModal] = useState<any>(null);
-  const [flash, setFlash] = useState<any>({});
+  const [modal, setModal] = useState(null);
+  const [flash, setFlash] = useState({});
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
@@ -164,14 +218,14 @@ function RealtimeTable() {
     let d = [...rows];
     if (filter !== "ALL") d = d.filter(r => r.ai === filter);
     d.sort((a,b) => {
-      const va = (a as any)[sortKey]; const vb = (b as any)[sortKey];
+      const va = a[sortKey]; const vb = b[sortKey];
       const s = va > vb ? 1 : va < vb ? -1 : 0;
       return dir === "asc" ? s : -s;
     });
     return d;
   }, [rows, sortKey, dir, filter]);
 
-  const HeaderCell = ({ k, label }: { k: string; label: string }) => (
+  const HeaderCell = ({ k, label }) => (
     <th className="px-3 py-2 cursor-pointer select-none" onClick={() => {
       if (sortKey === k) setDir(dir === "asc" ? "desc" : "asc"); else { setSortKey(k); setDir("asc"); }
     }}>
@@ -213,7 +267,7 @@ function RealtimeTable() {
                 <td className="px-3 py-2 text-right" style={{ color: "var(--kb-text)" }}>{r.price.toLocaleString()}</td>
                 <td className="px-3 py-2 text-right" style={{ color: r.change>=0? 'var(--kb-success)':'var(--kb-error)' }}>{r.change>0?`+${r.change}`:r.change}%</td>
                 <td className="px-3 py-2">
-                  <Badge variant={r.ai==='BUY'?'buy':r.ai==='SELL'?'sell':'hold'}>{r.ai}</Badge>
+                  <span className={`kb-badge ${r.ai==='BUY'?'badge-buy':r.ai==='SELL'?'badge-sell':'badge-hold'}`}>{r.ai}</span>
                 </td>
                 <td className="px-3 py-2">
                   <div className="w-full bg-[var(--kb-bg-elevated)] h-2 rounded-full">
@@ -238,7 +292,7 @@ function RealtimeTable() {
             <div className="mt-4 grid grid-cols-2 gap-4">
               <div className="kb-frame h-40 flex items-center justify-center text-sm" style={{ color: 'var(--kb-text-muted)' }}>詳細チャート（モーダル内）</div>
               <div>
-                <div>AI判断: <Badge variant={modal.ai==='BUY'?'buy':modal.ai==='SELL'?'sell':'hold'}>{modal.ai}</Badge></div>
+                <div>AI判断: <span className={`kb-badge ${modal.ai==='BUY'?'badge-buy':modal.ai==='SELL'?'badge-sell':'badge-hold'}`}>{modal.ai}</span></div>
                 <div className="mt-2">信頼度: {Math.round(modal.confidence*100)}%</div>
                 <div className="mt-2">現在価格: {modal.price.toLocaleString()} 円</div>
               </div>
@@ -250,11 +304,10 @@ function RealtimeTable() {
   );
 }
 
+// AI/Backtest/Admin sections moved into components/sections and routed
+
 export default function App() {
-  useEffect(() => {
-    console.log("Kaboom.ai Dashboard loaded");
-  }, []);
-  
+  useEffect(() => { runSelfTests(); }, []);
   return (
     <main className="kb-container space-y-6">
       <SummaryCards />
