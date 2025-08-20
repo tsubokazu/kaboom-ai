@@ -10,6 +10,8 @@ import {
   CheckCircleIcon,
   ClockIcon
 } from '@heroicons/react/24/outline'
+import { useWebSocket } from '@/hooks/useWebSocket'
+import { WebSocketMessage } from '@/stores/websocketStore'
 
 interface SystemMetric {
   timestamp: string
@@ -24,6 +26,12 @@ interface SystemMetric {
 
 export function SystemMetrics() {
   const [timeRange, setTimeRange] = useState<'1h' | '6h' | '24h' | '7d'>('24h')
+  const [lastUpdateTime, setLastUpdateTime] = useState<Date>(new Date())
+
+  // WebSocket接続とシステムメトリクス更新の監視
+  const { subscribe, isConnected } = useWebSocket({
+    autoConnect: true
+  })
   
   // モックメトリクスデータの生成
   const generateMetrics = useCallback((): SystemMetric[] => {
@@ -58,8 +66,40 @@ export function SystemMetrics() {
     setMetrics(generateMetrics())
   }, [timeRange, generateMetrics])
 
-  // リアルタイム更新のシミュレーション
+  // WebSocketからシステムメトリクス更新を受信
   useEffect(() => {
+    const unsubscribe = subscribe('system_metrics', (message: WebSocketMessage) => {
+      const { payload } = message
+      
+      setMetrics(prev => {
+        const newMetrics = [...prev]
+        const now = new Date()
+        const latest: SystemMetric = {
+          timestamp: now.toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' }),
+          activeUsers: (payload.activeUsers as number) || Math.floor(Math.random() * 50) + 80,
+          websocketConnections: (payload.websocketConnections as number) || Math.floor(Math.random() * 30) + 60,
+          apiRequests: (payload.apiRequests as number) || Math.floor(Math.random() * 200) + 300,
+          errorRate: payload.errorRate !== undefined ? (payload.errorRate as number) : Math.random() * 2,
+          responseTime: (payload.responseTime as number) || Math.random() * 100 + 150,
+          cpuUsage: (payload.cpuUsage as number) || Math.random() * 30 + 40,
+          memoryUsage: (payload.memoryUsage as number) || Math.random() * 20 + 60
+        }
+        
+        newMetrics.shift() // 最古のデータを削除
+        newMetrics.push(latest) // 新しいデータを追加
+        setLastUpdateTime(now) // 更新時間を記録
+        
+        return newMetrics
+      })
+    })
+
+    return unsubscribe
+  }, [subscribe])
+
+  // WebSocket未接続時のモック更新
+  useEffect(() => {
+    if (isConnected) return // WebSocket接続時はモック無効
+
     const interval = setInterval(() => {
       setMetrics(prev => {
         const newMetrics = [...prev]
@@ -76,22 +116,23 @@ export function SystemMetrics() {
         }
         newMetrics.shift() // 最古のデータを削除
         newMetrics.push(latest) // 新しいデータを追加
+        setLastUpdateTime(now)
         return newMetrics
       })
     }, 30000) // 30秒ごとに更新
 
     return () => clearInterval(interval)
-  }, [])
+  }, [isConnected])
 
   const currentMetrics = metrics[metrics.length - 1]
 
   const statusCards = [
     {
       title: 'システム状態',
-      value: 'オンライン',
-      status: 'success',
+      value: isConnected ? 'オンライン' : 'オフライン',
+      status: isConnected ? 'success' : 'warning',
       icon: CheckCircleIcon,
-      description: 'すべてのサービスが正常に動作中'
+      description: isConnected ? 'リアルタイム接続中' : 'モックデータ表示中'
     },
     {
       title: 'アクティブユーザー',
@@ -292,8 +333,11 @@ export function SystemMetrics() {
                style={{ background: 'var(--kb-bg)' }}>
             <ClockIcon className="w-4 h-4" style={{ color: 'var(--kb-text-muted)' }} />
             <span className="text-sm" style={{ color: 'var(--kb-text-muted)' }}>
-              最終更新: {new Date().toLocaleTimeString('ja-JP')}
+              最終更新: {lastUpdateTime.toLocaleTimeString('ja-JP')}
             </span>
+            {isConnected && (
+              <div className="ml-2 w-2 h-2 bg-green-500 rounded-full animate-pulse" />
+            )}
           </div>
         </Card>
       </div>

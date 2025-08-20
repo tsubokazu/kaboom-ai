@@ -12,6 +12,11 @@ import {
   Line,
 } from "recharts";
 import { Badge, Pill } from "@/components/ui";
+import { useWebSocket } from "@/hooks/useWebSocket";
+import { useWebSocketNotifications } from "@/hooks/useNotification";
+import { ToastContainer } from "@/components/ui/Toast";
+import { useNotification } from "@/hooks/useNotification";
+import { WebSocketMessage } from "@/stores/websocketStore";
 
 // Mock data helpers
 // 型定義
@@ -90,7 +95,30 @@ function useRealtimeNumbers() {
   const [monthly, setMonthly] = useState(345678);
   const [winRate, setWinRate] = useState(0.62);
 
+  // WebSocket接続とポートフォリオ更新の監視
+  const { subscribe, isConnected } = useWebSocket({
+    autoConnect: true,
+    onConnect: () => console.log('Dashboard WebSocket connected'),
+    onDisconnect: () => console.log('Dashboard WebSocket disconnected')
+  });
+
   useEffect(() => {
+    // WebSocketからポートフォリオ更新を受信
+    const unsubscribe = subscribe('portfolio_update', (message: WebSocketMessage) => {
+      const { payload } = message;
+      if (payload.totalAssets !== undefined) setTotal(payload.totalAssets as number);
+      if (payload.todayPL !== undefined) setToday(payload.todayPL as number);
+      if (payload.monthlyPL !== undefined) setMonthly(payload.monthlyPL as number);
+      if (payload.winRate !== undefined) setWinRate(payload.winRate as number);
+    });
+
+    return unsubscribe;
+  }, [subscribe]);
+
+  // WebSocket未接続時はモックデータで更新（開発用）
+  useEffect(() => {
+    if (isConnected) return; // WebSocket接続時はモック無効
+
     const id = setInterval(() => {
       setTotal((v) => v + Math.round((Math.random() - 0.48) * 4000));
       setToday((v) => v + Math.round((Math.random() - 0.5) * 1200));
@@ -100,8 +128,9 @@ function useRealtimeNumbers() {
       );
     }, 1000);
     return () => clearInterval(id);
-  }, []);
-  return { total, today, monthly, winRate };
+  }, [isConnected]);
+
+  return { total, today, monthly, winRate, isConnected };
 }
 
 function formatCurrency(n: number) {
@@ -117,7 +146,7 @@ function pct(n: number) {
 }
 
 function SummaryCards() {
-  const { total, today, monthly, winRate } = useRealtimeNumbers();
+  const { total, today, monthly, winRate, isConnected } = useRealtimeNumbers();
   const Item = ({
     label,
     value,
@@ -155,34 +184,50 @@ function SummaryCards() {
   };
 
   return (
-    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-      <Item label="総資産額" value={formatCurrency(total)} />
-      <Item label="本日の損益" value={formatCurrency(today)} sub={subToday} />
-      <Item label="月間損益" value={formatCurrency(monthly)} sub={subMonthly} />
-      <Item label="全体勝率" value={pct(winRate)} />
+    <div className="space-y-4">
+      {/* 接続状態表示 */}
+      <div className="flex items-center gap-2">
+        <div className={`w-2 h-2 rounded-full ${isConnected ? 'bg-green-500' : 'bg-red-500'}`} />
+        <span className="text-sm" style={{ color: 'var(--kb-text-muted)' }}>
+          {isConnected ? 'リアルタイム接続中' : 'オフライン（モックデータ）'}
+        </span>
+      </div>
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <Item label="総資産額" value={formatCurrency(total)} />
+        <Item label="本日の損益" value={formatCurrency(today)} sub={subToday} />
+        <Item label="月間損益" value={formatCurrency(monthly)} sub={subMonthly} />
+        <Item label="全体勝率" value={pct(winRate)} />
+      </div>
     </div>
   );
 }
 
 function PortfolioChart() {
   const [period, setPeriod] = useState("1M");
-  const [data, setData] = useState(makeChartData());
+  const [data, setData] = useState(() => makeChartData());
+
+  // Regenerate data when period changes
+  useEffect(() => {
+    setData(makeChartData());
+  }, [period]);
 
   useEffect(() => {
     const id = setInterval(() => {
-      setData((d) => {
-        const last = d[d.length - 1];
-        const nextT = last.t + 1;
+      setData((prevData) => {
+        if (prevData.length === 0) return makeChartData(); // Fallback for empty data
+        
+        const last = prevData[prevData.length - 1];
         const next = {
-          t: nextT,
+          t: last.t + 1,
           asset: last.asset + (Math.random() - 0.48) * 2,
           bench: last.bench + (Math.random() - 0.5) * 1.2,
         };
-        return [...d.slice(1), next];
+        return [...prevData.slice(1), next];
       });
     }, 1200);
     return () => clearInterval(id);
-  }, []);
+  }, []); // Keep this independent of period
 
   const periods = ["1D", "1W", "1M", "3M", "1Y", "ALL"];
 
@@ -262,11 +307,44 @@ function RealtimeTable() {
   const [flash, setFlash] = useState<FlashState>({});
   const [mounted, setMounted] = useState(false);
 
+  // WebSocket価格更新の監視
+  const { subscribe, isConnected } = useWebSocket({
+    autoConnect: true
+  });
+
   useEffect(() => {
     setMounted(true);
   }, []);
 
   useEffect(() => {
+    // WebSocketから価格更新を受信
+    const unsubscribe = subscribe('price_update', (message: WebSocketMessage) => {
+      const { payload } = message;
+      if (payload.symbol && payload.price !== undefined) {
+        setRows(prevRows => prevRows.map(row => {
+          if (row.code === payload.symbol) {
+            return {
+              ...row,
+              price: payload.price as number,
+              change: (payload.change as number) || row.change,
+              ai: (payload.aiJudgment as StockRow["ai"]) || row.ai,
+              confidence: (payload.confidence as number) || row.confidence,
+              updatedAt: new Date()
+            };
+          }
+          return row;
+        }));
+        setFlash({ t: Date.now() });
+      }
+    });
+
+    return unsubscribe;
+  }, [subscribe]);
+
+  useEffect(() => {
+    // WebSocket未接続時のモックデータ更新
+    if (isConnected) return;
+
     const id = setInterval(() => {
       setRows((rs) =>
         rs.map((r) => {
@@ -291,7 +369,7 @@ function RealtimeTable() {
       setFlash({ t: Date.now() });
     }, 1000);
     return () => clearInterval(id);
-  }, []);
+  }, [isConnected]);
 
   const display = useMemo(() => {
     let d = [...rows];
@@ -472,15 +550,33 @@ function RealtimeTable() {
 }
 
 export default function App() {
+  const { toasts, removeToast } = useNotification();
+  const { handleWebSocketMessage } = useWebSocketNotifications();
+
+  // WebSocket通知の処理
+  useWebSocket({
+    autoConnect: true,
+    onMessage: handleWebSocketMessage
+  });
+
   useEffect(() => {
     console.log("Kaboom.ai Dashboard loaded");
   }, []);
 
   return (
-    <main className="kb-container space-y-6">
-      <SummaryCards />
-      <PortfolioChart />
-      <RealtimeTable />
-    </main>
+    <>
+      <main className="kb-container space-y-6">
+        <SummaryCards />
+        <PortfolioChart />
+        <RealtimeTable />
+      </main>
+      
+      {/* 通知コンテナ */}
+      <ToastContainer 
+        toasts={toasts} 
+        onClose={removeToast}
+        position="top-right" 
+      />
+    </>
   );
 }
