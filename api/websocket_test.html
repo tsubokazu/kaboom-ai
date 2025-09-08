@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Kaboom WebSocket Test</title>
+    <style>
+        body { 
+            font-family: Arial, sans-serif; 
+            max-width: 800px; 
+            margin: 50px auto; 
+            padding: 20px; 
+        }
+        .status { 
+            padding: 10px; 
+            margin: 10px 0; 
+            border-radius: 5px; 
+        }
+        .connected { background-color: #d4edda; color: #155724; }
+        .disconnected { background-color: #f8d7da; color: #721c24; }
+        .connecting { background-color: #fff3cd; color: #856404; }
+        .messages { 
+            height: 300px; 
+            overflow-y: scroll; 
+            border: 1px solid #ccc; 
+            padding: 10px; 
+            margin: 10px 0; 
+        }
+        .message { 
+            margin: 5px 0; 
+            padding: 5px; 
+            background: #f8f9fa; 
+            border-left: 3px solid #007bff; 
+        }
+        button { 
+            margin: 5px; 
+            padding: 10px 20px; 
+            background: #007bff; 
+            color: white; 
+            border: none; 
+            border-radius: 5px; 
+            cursor: pointer; 
+        }
+        button:hover { background: #0056b3; }
+        input { 
+            padding: 10px; 
+            margin: 5px; 
+            width: 200px; 
+        }
+    </style>
+</head>
+<body>
+    <h1>🚀 Kaboom WebSocket接続テスト</h1>
+    
+    <div id="status" class="status disconnected">切断中</div>
+    
+    <div>
+        <button onclick="connect()">接続</button>
+        <button onclick="disconnect()">切断</button>
+        <button onclick="sendPing()">Ping送信</button>
+        <button onclick="clearMessages()">ログクリア</button>
+    </div>
+    
+    <div>
+        <input type="text" id="symbolInput" placeholder="銘柄コード (例: 7203.T)" value="7203.T">
+        <button onclick="subscribePrice()">価格購読</button>
+        <button onclick="triggerAI()">AI分析実行</button>
+    </div>
+    
+    <h3>受信メッセージ:</h3>
+    <div id="messages" class="messages"></div>
+
+    <script>
+        let websocket = null;
+        let connectionId = null;
+        
+        function updateStatus(status, message) {
+            const statusDiv = document.getElementById('status');
+            statusDiv.textContent = message;
+            statusDiv.className = `status ${status}`;
+        }
+        
+        function addMessage(type, data) {
+            const messagesDiv = document.getElementById('messages');
+            const messageDiv = document.createElement('div');
+            messageDiv.className = 'message';
+            
+            const timestamp = new Date().toLocaleTimeString();
+            messageDiv.innerHTML = `
+                <strong>[${timestamp}] ${type}:</strong><br>
+                <pre>${JSON.stringify(data, null, 2)}</pre>
+            `;
+            
+            messagesDiv.appendChild(messageDiv);
+            messagesDiv.scrollTop = messagesDiv.scrollHeight;
+        }
+        
+        function connect() {
+            if (websocket) {
+                websocket.close();
+            }
+            
+            updateStatus('connecting', '接続中...');
+            websocket = new WebSocket('ws://localhost:8080/ws');
+            
+            websocket.onopen = function(event) {
+                updateStatus('connected', '接続成功 ✅');
+                addMessage('CONNECTION', { status: 'connected', event: event });
+            };
+            
+            websocket.onmessage = function(event) {
+                try {
+                    const message = JSON.parse(event.data);
+                    addMessage('RECEIVED', message);
+                    
+                    // 特別な処理
+                    if (message.type === 'notification' && message.payload.connection_id) {
+                        connectionId = message.payload.connection_id;
+                        updateStatus('connected', `接続成功 ✅ (ID: ${connectionId.substring(0, 8)})`);
+                    }
+                    
+                } catch (error) {
+                    addMessage('ERROR', { error: 'Failed to parse message', data: event.data });
+                }
+            };
+            
+            websocket.onclose = function(event) {
+                updateStatus('disconnected', '切断されました');
+                addMessage('CONNECTION', { status: 'disconnected', code: event.code, reason: event.reason });
+                websocket = null;
+                connectionId = null;
+            };
+            
+            websocket.onerror = function(error) {
+                updateStatus('error', 'エラーが発生しました');
+                addMessage('ERROR', { error: error });
+            };
+        }
+        
+        function disconnect() {
+            if (websocket) {
+                websocket.close(1000, 'Manual disconnect');
+            }
+        }
+        
+        function sendPing() {
+            if (websocket && websocket.readyState === WebSocket.OPEN) {
+                const message = {
+                    type: 'ping',
+                    timestamp: new Date().toISOString(),
+                    id: Date.now().toString()
+                };
+                websocket.send(JSON.stringify(message));
+                addMessage('SENT', message);
+            } else {
+                addMessage('ERROR', { error: 'WebSocket not connected' });
+            }
+        }
+        
+        function subscribePrice() {
+            if (websocket && websocket.readyState === WebSocket.OPEN) {
+                const message = {
+                    type: 'subscribe',
+                    payload: { topic: 'price_update' },
+                    timestamp: new Date().toISOString(),
+                    id: Date.now().toString()
+                };
+                websocket.send(JSON.stringify(message));
+                addMessage('SENT', message);
+            } else {
+                addMessage('ERROR', { error: 'WebSocket not connected' });
+            }
+        }
+        
+        async function triggerAI() {
+            const symbol = document.getElementById('symbolInput').value || '7203.T';
+            
+            try {
+                const response = await fetch(`http://localhost:8080/api/v1/analysis/${symbol}`, {
+                    method: 'POST'
+                });
+                
+                const result = await response.json();
+                addMessage('AI_TRIGGER', { symbol, response: result });
+                
+            } catch (error) {
+                addMessage('ERROR', { error: 'Failed to trigger AI analysis', details: error.message });
+            }
+        }
+        
+        function clearMessages() {
+            document.getElementById('messages').innerHTML = '';
+        }
+        
+        // 自動接続
+        window.onload = function() {
+            connect();
+        };
+    </script>
+</body>
+</html>

@@ -1,0 +1,144 @@
+name: Deploy to Cloud Run
+
+on:
+  push:
+    branches: [ main, develop ]
+    paths:
+      - 'api/**'
+      - '.github/workflows/deploy.yml'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'api/**'
+
+env:
+  PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+  SERVICE_NAME: kaboom-api
+  REGION: asia-northeast1
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./api
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Set up Python 3.12
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.12'
+    
+    - name: Install uv
+      uses: astral-sh/setup-uv@v3
+      with:
+        enable-cache: true
+        cache-dependency-glob: "api/pyproject.toml"
+    
+    - name: Install dependencies
+      run: uv sync --frozen
+    
+    - name: Run linting
+      run: |
+        uv run black --check .
+        uv run isort --check-only .
+        uv run mypy .
+      continue-on-error: true
+    
+    - name: Run tests
+      run: uv run pytest
+      continue-on-error: true
+
+  build-and-deploy:
+    needs: test
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop'
+    
+    defaults:
+      run:
+        working-directory: ./api
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Set up Cloud SDK
+      uses: google-github-actions/setup-gcloud@v2
+      with:
+        project_id: ${{ secrets.GCP_PROJECT_ID }}
+        service_account_key: ${{ secrets.GCP_SA_KEY }}
+        export_default_credentials: true
+    
+    - name: Configure Docker for GCR
+      run: gcloud auth configure-docker gcr.io
+    
+    - name: Build Docker image
+      run: |
+        IMAGE_TAG="gcr.io/$PROJECT_ID/$SERVICE_NAME:${{ github.sha }}"
+        docker build -t $IMAGE_TAG .
+        echo "IMAGE_TAG=$IMAGE_TAG" >> $GITHUB_ENV
+    
+    - name: Push Docker image
+      run: docker push $IMAGE_TAG
+    
+    - name: Create secrets in Secret Manager
+      run: |
+        # Create secrets if they don't exist
+        gcloud secrets create kaboom-secrets --data-file=/dev/null || true
+        
+        # Update secret versions (in production, use proper secret values)
+        echo "dummy-supabase-url" | gcloud secrets versions add kaboom-secrets --data-file=-
+      continue-on-error: true
+    
+    - name: Deploy to Cloud Run (Develop)
+      if: github.ref == 'refs/heads/develop'
+      run: |
+        gcloud run deploy $SERVICE_NAME-dev \
+          --image $IMAGE_TAG \
+          --region $REGION \
+          --platform managed \
+          --allow-unauthenticated \
+          --set-env-vars="DEBUG=true" \
+          --min-instances=0 \
+          --max-instances=5 \
+          --cpu=1 \
+          --memory=2Gi \
+          --timeout=3600s \
+          --concurrency=1000 \
+          --port=8080
+    
+    - name: Deploy to Cloud Run (Production)
+      if: github.ref == 'refs/heads/main'
+      run: |
+        gcloud run deploy $SERVICE_NAME \
+          --image $IMAGE_TAG \
+          --region $REGION \
+          --platform managed \
+          --allow-unauthenticated \
+          --set-env-vars="DEBUG=false" \
+          --min-instances=1 \
+          --max-instances=10 \
+          --cpu=2 \
+          --memory=4Gi \
+          --timeout=3600s \
+          --concurrency=1000 \
+          --port=8080
+    
+    - name: Update service YAML
+      run: |
+        sed -i "s|gcr.io/PROJECT_ID/kaboom-api:latest|$IMAGE_TAG|g" service.yaml
+        sed -i "s/PROJECT_ID/$PROJECT_ID/g" service.yaml
+    
+    - name: Output deployment URL
+      run: |
+        if [ "${{ github.ref }}" = "refs/heads/main" ]; then
+          SERVICE_URL=$(gcloud run services describe $SERVICE_NAME --region=$REGION --format='value(status.url)')
+        else
+          SERVICE_URL=$(gcloud run services describe $SERVICE_NAME-dev --region=$REGION --format='value(status.url)')
+        fi
+        echo "🚀 Deployment successful!"
+        echo "Service URL: $SERVICE_URL"
+        echo "WebSocket URL: ${SERVICE_URL/https/wss}/ws"

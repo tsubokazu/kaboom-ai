@@ -22,16 +22,16 @@ This is a stock trading management system with AI-powered analysis and backtesti
 
 ### Backend Architecture (api/)
 - **Framework**: FastAPI with async/await throughout
-- **AI Processing**: LangGraph workflows with multiple AI agents (market analysis, technical analysis, decision making)
+- **AI Processing**: OpenRouter統一API経由で複数AIモデル（GPT-4, Claude, Gemini等）を統合管理
 - **Real-time**: WebSocket + Redis Pub/Sub for real-time data distribution
-- **External APIs**: Integration with trading APIs (立花証券), market data (yfinance), AI providers (OpenAI, Gemini)
+- **External APIs**: Integration with trading APIs (立花証券), market data (yfinance)
 - **Background Tasks**: Celery for heavy processing (backtests, AI analysis, market data updates)
 - **Charts**: matplotlib + mplfinance for generating chart images served to frontend
 
 ### Data Flow
 1. **Authentication**: Supabase handles auth, backend validates JWT tokens
 2. **Real-time Data**: Market data flows through WebSocket connections managed by Redis Pub/Sub
-3. **AI Analysis**: LangGraph workflows process market data through multiple AI agents
+3. **AI Analysis**: OpenRouter統一APIで複数AIモデル（GPT-4, Claude, Gemini）による並列分析・合意形成
 4. **Trading**: Frontend sends trade requests to FastAPI, which executes via external trading APIs
 
 ## Development Commands
@@ -93,11 +93,17 @@ cd api && celery -A app.tasks.celery_app beat --loglevel=info
 - Automatic reconnection with exponential backoff on frontend
 - Tab synchronization using BroadcastChannel to prevent duplicate connections
 
-### AI Processing Pipeline
-- LangGraph workflows coordinate multiple AI agents
-- Chart generation happens server-side using matplotlib/mplfinance
-- AI decisions are cached and distributed via WebSocket
-- Multiple AI providers (OpenAI, Gemini) for decision comparison
+### AI Processing Pipeline (OpenRouter統合戦略)
+- **統一API**: OpenRouter (https://openrouter.ai/) 経由で20+のAIモデルにアクセス
+- **モデル設定**:
+  - Technical Analysis: `openai/gpt-4-turbo-preview`
+  - Sentiment Analysis: `anthropic/claude-3-sonnet` 
+  - Risk Assessment: `google/gemini-pro-vision`
+  - Fallback: `meta-llama/llama-2-70b-chat`
+- **コスト管理**: 統一ダッシュボードでリアルタイム使用量・コスト監視
+- **Chart generation**: matplotlib/mplfinance でサーバーサイド画像生成
+- **AI decisions**: Redis経由でキャッシュ・WebSocket配信
+- **フォールバック**: モデル障害時の自動切り替え機能
 
 ### Data Fetching Strategy
 Instead of TanStack Query, use Next.js 15 native features combined with WebSocket for optimal performance:
@@ -294,11 +300,92 @@ The project will use GitHub Actions to enforce these standards:
 - Build verification for both frontend and backend
 - Security scanning for dependencies
 
+## OpenRouter統合実装ガイド
+
+### 環境変数設定
+```bash
+# 必須設定
+OPENROUTER_API_KEY=sk-or-v1-xxxxxxxxxxxxx
+
+# オプション設定
+OPENROUTER_DEBUG=false
+OPENROUTER_LOG_REQUESTS=true
+OPENROUTER_COST_TRACKING=true
+```
+
+### AIモデル設定例
+```python
+AI_MODEL_CONFIG = {
+    "technical_analysis": {
+        "primary": "openai/gpt-4-turbo-preview",
+        "fallback": "anthropic/claude-3-sonnet",
+        "temperature": 0.1,
+        "max_tokens": 1000
+    },
+    "sentiment_analysis": {
+        "primary": "anthropic/claude-3-sonnet", 
+        "fallback": "openai/gpt-4-turbo-preview",
+        "temperature": 0.2,
+        "max_tokens": 800
+    }
+}
+```
+
+### API呼び出し例
+```python
+# 基本的なAI分析リクエスト
+async def analyze_stock(symbol: str, analysis_type: str):
+    payload = {
+        "model": "openai/gpt-4-turbo-preview",
+        "messages": [
+            {"role": "system", "content": TECHNICAL_ANALYSIS_PROMPT},
+            {"role": "user", "content": f"銘柄{symbol}のテクニカル分析を実行"}
+        ],
+        "temperature": 0.1,
+        "max_tokens": 1000
+    }
+    
+    async with aiohttp.ClientSession() as session:
+        async with session.post(
+            "https://openrouter.ai/api/v1/chat/completions",
+            headers={"Authorization": f"Bearer {OPENROUTER_API_KEY}"},
+            json=payload
+        ) as response:
+            return await response.json()
+```
+
+### エラーハンドリング
+- `429 Rate Limit`: 指数バックオフでリトライ
+- `503 Service Unavailable`: フォールバックモデルに切り替え
+- `400 Bad Request`: プロンプト形式エラー - 構造化レスポンスの確認
+
+## 標準ドキュメント体系
+
+### API設計文書
+- **設計計画**: `docs/api-development-plan.md` - OpenRouter統合を軸とした4週間実装計画
+- **ADR**: `docs/architecture/adr/0001-openrouter-ai-integration.md` - OpenRouter採用の技術的根拠
+- **エラーカタログ**: `docs/api/error-catalog.md` - RFC 7807準拠の統一エラー定義
+- **OpenRouter統合**: `docs/ai/openrouter-integration.md` - 実装レベルの詳細設計
+- **API仕様**: `docs/api/openapi.yaml` - 完全なREST API契約
+
+### 実装優先度
+1. **Week 1**: OpenRouterクライアント基盤 + 基本API契約
+2. **Week 2**: AI分析ジョブ（非同期処理） + バックテスト機能
+3. **Week 3**: 認証システム + セキュリティ + 監視
+4. **Week 4**: パフォーマンス最適化 + E2Eテスト
+
 ## Important File Locations
 
-- **Design Documents**: `docs/` - Contains comprehensive system design and development phases
-- **Frontend Planning**: `docs/web_application_planning.md` - Detailed frontend specifications
-- **Backend Planning**: Second half of `docs/web_application_planning.md` - API and system design
-- **Architecture**: `docs/directory_structure_design.md` - Complete directory structure with rationale
+- **API設計**: `docs/api-development-plan.md` - OpenRouter統合API開発計画
+- **設計根拠**: `docs/architecture/adr/` - 重要な技術選択の意思決定記録
+- **Frontend Planning**: `docs/web_application_planning.md` - 詳細なUI仕様
+- **Backend Planning**: Second half of `docs/web_application_planning.md` - API システム設計
+- **Architecture**: `docs/directory_structure_design.md` - ディレクトリ構造設計
 
-When implementing, follow the detailed specifications in the docs folder, particularly the component architecture in the directory structure design and the phased development approach outlined in the development phases plan.
+### 新規実装時の参照順序
+1. `docs/api-development-plan.md` - 全体計画の確認
+2. `docs/architecture/adr/0001-openrouter-ai-integration.md` - 技術選択の理解  
+3. `docs/api/openapi.yaml` - API契約の詳細確認
+4. `docs/ai/openrouter-integration.md` - 実装コード例の参照
+
+When implementing, prioritize OpenRouter integration and follow the 4-week development schedule outlined in the API development plan. Always refer to the ADR for technical decision rationale and the comprehensive error catalog for consistent error handling.

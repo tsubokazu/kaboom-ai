@@ -1,0 +1,1211 @@
+openapi: 3.0.3
+info:
+  title: Kaboom Stock Trading API
+  version: 1.0.0
+  description: |
+    Real-time stock trading management system with AI-powered analysis and backtesting capabilities.
+    
+    ## Key Features
+    - Multi-AI model analysis via OpenRouter integration
+    - Real-time portfolio management
+    - Advanced backtesting engine
+    - WebSocket-based live data streaming
+    
+    ## Authentication
+    All endpoints require JWT Bearer token authentication via Supabase Auth.
+    
+    ## Rate Limiting
+    - Basic users: 100 requests/hour
+    - Premium users: 1000 requests/hour  
+    - Enterprise users: 10000 requests/hour
+    
+  contact:
+    name: Kaboom API Support
+    url: https://github.com/kaboom-trading/api
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
+
+servers:
+  - url: https://api.kaboom-trading.com/v1
+    description: Production server
+  - url: https://staging-api.kaboom-trading.com/v1  
+    description: Staging server
+  - url: http://localhost:8000/api/v1
+    description: Development server
+
+security:
+  - BearerAuth: []
+
+paths:
+  # ===============================
+  # Authentication Endpoints
+  # ===============================
+  /auth/verify:
+    post:
+      summary: Verify JWT token
+      description: Verify Supabase JWT token and return user information
+      tags:
+        - Authentication
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                token:
+                  type: string
+                  format: jwt
+                  description: Supabase JWT token
+              required:
+                - token
+      responses:
+        '200':
+          description: Token verified successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  user_id:
+                    type: string
+                    format: uuid
+                  email:
+                    type: string
+                    format: email
+                  role:
+                    type: string
+                    enum: [basic, premium, enterprise, admin]
+                  verified:
+                    type: boolean
+                    example: true
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+
+  # ===============================
+  # Portfolio Management
+  # ===============================
+  /portfolios:
+    get:
+      summary: List user portfolios
+      description: Retrieve all portfolios for the authenticated user
+      tags:
+        - Portfolios
+      parameters:
+        - $ref: '#/components/parameters/PageParam'
+        - $ref: '#/components/parameters/LimitParam'
+      responses:
+        '200':
+          description: Portfolios retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Portfolio'
+                  total:
+                    type: integer
+                    example: 5
+                  page:
+                    type: integer
+                    example: 1
+                  limit:
+                    type: integer
+                    example: 10
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+
+    post:
+      summary: Create new portfolio
+      description: Create a new trading portfolio
+      tags:
+        - Portfolios
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                  maxLength: 100
+                  example: "Tech Growth Portfolio"
+                description:
+                  type: string
+                  maxLength: 500
+                  example: "Focus on technology growth stocks"
+                initial_capital:
+                  type: number
+                  minimum: 10000
+                  example: 1000000
+                  description: Initial capital in JPY
+              required:
+                - name
+                - initial_capital
+      responses:
+        '201':
+          description: Portfolio created successfully
+          headers:
+            Location:
+              schema:
+                type: string
+                format: uri
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Portfolio'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+
+  /portfolios/{portfolio_id}:
+    get:
+      summary: Get portfolio details
+      description: Retrieve detailed information for a specific portfolio
+      tags:
+        - Portfolios
+      parameters:
+        - name: portfolio_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Portfolio details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PortfolioDetail'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+    put:
+      summary: Update portfolio
+      description: Update portfolio information
+      tags:
+        - Portfolios
+      parameters:
+        - name: portfolio_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                  maxLength: 100
+                description:
+                  type: string
+                  maxLength: 500
+      responses:
+        '200':
+          description: Portfolio updated successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Portfolio'
+
+    delete:
+      summary: Delete portfolio
+      description: Permanently delete a portfolio and all associated trades
+      tags:
+        - Portfolios
+      parameters:
+        - name: portfolio_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '204':
+          description: Portfolio deleted successfully
+        '409':
+          description: Cannot delete portfolio with active trades
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+
+  # ===============================
+  # AI Analysis (OpenRouter Integration)
+  # ===============================
+  /ai/analyze:
+    post:
+      summary: Trigger AI stock analysis
+      description: |
+        Submit a request for AI-powered stock analysis using multiple models via OpenRouter.
+        Returns a job ID for tracking the asynchronous analysis process.
+      tags:
+        - AI Analysis
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                symbol:
+                  type: string
+                  pattern: '^[0-9]{4}$'
+                  example: "7203"
+                  description: Japanese stock code (4 digits)
+                models:
+                  type: array
+                  items:
+                    type: string
+                  example: 
+                    - "openai/gpt-4-turbo-preview"
+                    - "anthropic/claude-3-sonnet"
+                  description: OpenRouter model identifiers
+                analysis_types:
+                  type: array
+                  items:
+                    type: string
+                    enum: [technical, sentiment, risk]
+                  example: ["technical", "sentiment"]
+                timeframes:
+                  type: array
+                  items:
+                    type: string
+                    enum: ["1m", "5m", "15m", "1h", "4h", "1d"]
+                  example: ["1h", "4h", "1d"]
+                  description: Chart timeframes for analysis
+              required:
+                - symbol
+                - analysis_types
+      responses:
+        '202':
+          description: Analysis request accepted
+          headers:
+            Location:
+              schema:
+                type: string
+                format: uri
+                example: /api/v1/ai/analysis/550e8400-e29b-41d4-a716-446655440000
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  job_id:
+                    type: string
+                    format: uuid
+                  status:
+                    type: string
+                    enum: [queued]
+                  estimated_completion:
+                    type: string
+                    format: date-time
+                  models_count:
+                    type: integer
+                    example: 2
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '429':
+          description: AI quota exceeded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+
+  /ai/analysis/{job_id}:
+    get:
+      summary: Get AI analysis status/results
+      description: Retrieve the status and results of an AI analysis job
+      tags:
+        - AI Analysis
+      parameters:
+        - name: job_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Analysis results (when completed)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AIAnalysisResult'
+        '202':
+          description: Analysis in progress
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AIAnalysisStatus'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+  /ai/decisions:
+    get:
+      summary: List AI analysis history
+      description: Retrieve historical AI analysis decisions with filtering
+      tags:
+        - AI Analysis
+      parameters:
+        - $ref: '#/components/parameters/PageParam'
+        - $ref: '#/components/parameters/LimitParam'
+        - name: symbol
+          in: query
+          schema:
+            type: string
+          description: Filter by stock symbol
+        - name: start_date
+          in: query
+          schema:
+            type: string
+            format: date
+          description: Start date for filtering
+        - name: end_date
+          in: query
+          schema:
+            type: string
+            format: date
+          description: End date for filtering
+      responses:
+        '200':
+          description: AI decisions history
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/AIDecision'
+                  total:
+                    type: integer
+                  page:
+                    type: integer
+                  limit:
+                    type: integer
+
+  # ===============================
+  # Trading Operations
+  # ===============================
+  /trades:
+    get:
+      summary: List trades
+      description: Retrieve trade history with filtering options
+      tags:
+        - Trading
+      parameters:
+        - $ref: '#/components/parameters/PageParam'
+        - $ref: '#/components/parameters/LimitParam'
+        - name: portfolio_id
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: symbol
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Trades list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Trade'
+                  total:
+                    type: integer
+                  page:
+                    type: integer
+                  limit:
+                    type: integer
+
+    post:
+      summary: Execute trade
+      description: Submit a new trade order
+      tags:
+        - Trading
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TradeRequest'
+      responses:
+        '201':
+          description: Trade order submitted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Trade'
+        '400':
+          description: Invalid trade parameters
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+        '409':
+          description: Market closed or insufficient balance
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+
+  # ===============================
+  # Backtesting
+  # ===============================
+  /backtest/run:
+    post:
+      summary: Start backtest
+      description: Submit a backtest job with specified strategy and parameters
+      tags:
+        - Backtesting
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BacktestRequest'
+      responses:
+        '202':
+          description: Backtest job submitted
+          headers:
+            Location:
+              schema:
+                type: string
+                format: uri
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  job_id:
+                    type: string
+                    format: uuid
+                  status:
+                    type: string
+                    enum: [queued]
+                  estimated_duration:
+                    type: string
+                    example: "PT15M"
+                    description: ISO 8601 duration
+
+  /backtest/results/{job_id}:
+    get:
+      summary: Get backtest results
+      description: Retrieve backtest results and performance metrics
+      tags:
+        - Backtesting
+      parameters:
+        - name: job_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Backtest completed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BacktestResult'
+        '202':
+          description: Backtest in progress
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BacktestStatus'
+
+  # ===============================
+  # Market Data
+  # ===============================
+  /market/prices:
+    get:
+      summary: Get current market prices
+      description: Retrieve real-time price data for specified symbols
+      tags:
+        - Market Data
+      parameters:
+        - name: symbols
+          in: query
+          required: true
+          schema:
+            type: array
+            items:
+              type: string
+          style: form
+          explode: false
+          example: "7203,9984,6758"
+      responses:
+        '200':
+          description: Current prices
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    additionalProperties:
+                      $ref: '#/components/schemas/PriceData'
+                  timestamp:
+                    type: string
+                    format: date-time
+
+  /market/chart/{symbol}:
+    get:
+      summary: Get chart image
+      description: Generate chart image for technical analysis
+      tags:
+        - Market Data
+      parameters:
+        - name: symbol
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: timeframe
+          in: query
+          schema:
+            type: string
+            enum: ["1m", "5m", "15m", "1h", "4h", "1d"]
+            default: "1h"
+        - name: width
+          in: query
+          schema:
+            type: integer
+            default: 800
+        - name: height
+          in: query
+          schema:
+            type: integer
+            default: 600
+      responses:
+        '200':
+          description: Chart image
+          content:
+            image/png:
+              schema:
+                type: string
+                format: binary
+
+components:
+  # ===============================
+  # Security Schemes
+  # ===============================
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Supabase JWT token
+
+  # ===============================
+  # Reusable Parameters
+  # ===============================
+  parameters:
+    PageParam:
+      name: page
+      in: query
+      schema:
+        type: integer
+        minimum: 1
+        default: 1
+      description: Page number for pagination
+      
+    LimitParam:
+      name: limit
+      in: query
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 20
+      description: Number of items per page
+
+  # ===============================
+  # Schema Definitions
+  # ===============================
+  schemas:
+    # Error Handling (RFC 7807)
+    ProblemDetail:
+      type: object
+      properties:
+        type:
+          type: string
+          format: uri
+          example: "https://kaboom-api.com/problems/insufficient-balance"
+        title:
+          type: string
+          example: "Insufficient Balance"
+        status:
+          type: integer
+          example: 400
+        detail:
+          type: string
+          example: "Account balance (¥50,000) is insufficient for trade amount (¥100,000)"
+        instance:
+          type: string
+          format: uri
+          example: "/api/v1/trades/abc123"
+        timestamp:
+          type: string
+          format: date-time
+        trace_id:
+          type: string
+          format: uuid
+        context:
+          type: object
+          additionalProperties: true
+      required:
+        - type
+        - title
+        - status
+
+    # Portfolio Schemas
+    Portfolio:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+          example: "Tech Growth Portfolio"
+        description:
+          type: string
+          example: "Focus on technology growth stocks"
+        initial_capital:
+          type: number
+          example: 1000000
+        current_balance:
+          type: number
+          example: 1150000
+        total_return:
+          type: number
+          example: 150000
+        total_return_percent:
+          type: number
+          example: 15.0
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+      required:
+        - id
+        - name
+        - initial_capital
+        - current_balance
+
+    PortfolioDetail:
+      allOf:
+        - $ref: '#/components/schemas/Portfolio'
+        - type: object
+          properties:
+            positions:
+              type: array
+              items:
+                $ref: '#/components/schemas/Position'
+            performance_metrics:
+              $ref: '#/components/schemas/PerformanceMetrics'
+
+    Position:
+      type: object
+      properties:
+        symbol:
+          type: string
+          example: "7203"
+        quantity:
+          type: integer
+          example: 100
+        average_price:
+          type: number
+          example: 2500.0
+        current_price:
+          type: number
+          example: 2650.0
+        market_value:
+          type: number
+          example: 265000
+        unrealized_pnl:
+          type: number
+          example: 15000
+        weight:
+          type: number
+          example: 23.04
+          description: Position weight as percentage of portfolio
+
+    PerformanceMetrics:
+      type: object
+      properties:
+        sharpe_ratio:
+          type: number
+          example: 1.25
+        max_drawdown:
+          type: number
+          example: -8.5
+        win_rate:
+          type: number
+          example: 67.3
+        total_trades:
+          type: integer
+          example: 45
+
+    # AI Analysis Schemas
+    AIAnalysisResult:
+      type: object
+      properties:
+        job_id:
+          type: string
+          format: uuid
+        symbol:
+          type: string
+          example: "7203"
+        status:
+          type: string
+          enum: [completed]
+        model_results:
+          type: array
+          items:
+            $ref: '#/components/schemas/AIModelResult'
+        aggregated_decision:
+          $ref: '#/components/schemas/AIAggregatedDecision'
+        execution_metrics:
+          $ref: '#/components/schemas/AIExecutionMetrics'
+        created_at:
+          type: string
+          format: date-time
+        completed_at:
+          type: string
+          format: date-time
+
+    AIAnalysisStatus:
+      type: object
+      properties:
+        job_id:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [queued, processing, completed, failed]
+        progress:
+          type: number
+          minimum: 0
+          maximum: 100
+          example: 65.5
+        current_stage:
+          type: string
+          example: "ai_processing"
+        estimated_completion:
+          type: string
+          format: date-time
+
+    AIModelResult:
+      type: object
+      properties:
+        model:
+          type: string
+          example: "openai/gpt-4-turbo-preview"
+        analysis_type:
+          type: string
+          enum: [technical, sentiment, risk]
+        decision:
+          type: string
+          enum: [buy, sell, hold]
+        confidence:
+          type: number
+          minimum: 0
+          maximum: 1
+          example: 0.85
+        reasoning:
+          type: string
+          example: "RSI indicates oversold conditions, MACD showing bullish crossover"
+        cost_usd:
+          type: number
+          example: 0.023
+        processing_time:
+          type: number
+          example: 2.34
+          description: Processing time in seconds
+
+    AIAggregatedDecision:
+      type: object
+      properties:
+        final_decision:
+          type: string
+          enum: [buy, sell, hold]
+        consensus_confidence:
+          type: number
+          minimum: 0
+          maximum: 1
+          example: 0.78
+        model_agreement:
+          type: number
+          minimum: 0
+          maximum: 1
+          example: 0.67
+          description: Ratio of models agreeing on decision
+
+    AIExecutionMetrics:
+      type: object
+      properties:
+        total_cost_usd:
+          type: number
+          example: 0.067
+        processing_time_seconds:
+          type: number
+          example: 8.45
+        models_used:
+          type: integer
+          example: 3
+        fallback_count:
+          type: integer
+          example: 0
+
+    AIDecision:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        symbol:
+          type: string
+        decision:
+          type: string
+          enum: [buy, sell, hold]
+        confidence:
+          type: number
+        created_at:
+          type: string
+          format: date-time
+
+    # Trading Schemas
+    Trade:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        portfolio_id:
+          type: string
+          format: uuid
+        symbol:
+          type: string
+          example: "7203"
+        action:
+          type: string
+          enum: [buy, sell]
+        quantity:
+          type: integer
+          example: 100
+        price:
+          type: number
+          example: 2500.0
+        order_type:
+          type: string
+          enum: [market, limit]
+        status:
+          type: string
+          enum: [pending, executed, cancelled, failed]
+        executed_at:
+          type: string
+          format: date-time
+        commission:
+          type: number
+          example: 250.0
+        ai_analysis_id:
+          type: string
+          format: uuid
+          nullable: true
+
+    TradeRequest:
+      type: object
+      properties:
+        portfolio_id:
+          type: string
+          format: uuid
+        symbol:
+          type: string
+          pattern: '^[0-9]{4}$'
+        action:
+          type: string
+          enum: [buy, sell]
+        quantity:
+          type: integer
+          minimum: 1
+        price:
+          type: number
+          minimum: 0
+          description: Price for limit orders (optional for market orders)
+        order_type:
+          type: string
+          enum: [market, limit]
+          default: market
+        ai_analysis_id:
+          type: string
+          format: uuid
+          description: Related AI analysis (optional)
+      required:
+        - portfolio_id
+        - symbol
+        - action
+        - quantity
+
+    # Backtesting Schemas
+    BacktestRequest:
+      type: object
+      properties:
+        strategy_config:
+          $ref: '#/components/schemas/StrategyConfig'
+        simulation_config:
+          $ref: '#/components/schemas/SimulationConfig'
+      required:
+        - strategy_config
+        - simulation_config
+
+    StrategyConfig:
+      type: object
+      properties:
+        name:
+          type: string
+          example: "multi_ai_consensus"
+        ai_models:
+          type: array
+          items:
+            type: string
+          example: ["openai/gpt-4-turbo-preview", "anthropic/claude-3-sonnet"]
+        consensus_threshold:
+          type: number
+          minimum: 0
+          maximum: 1
+          example: 0.7
+
+    SimulationConfig:
+      type: object
+      properties:
+        symbols:
+          type: array
+          items:
+            type: string
+          example: ["7203", "9984"]
+        start_date:
+          type: string
+          format: date
+          example: "2023-01-01"
+        end_date:
+          type: string
+          format: date
+          example: "2024-01-01"
+        initial_capital:
+          type: number
+          example: 1000000
+        commission_rate:
+          type: number
+          example: 0.001
+
+    BacktestResult:
+      type: object
+      properties:
+        job_id:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [completed]
+        summary:
+          $ref: '#/components/schemas/BacktestSummary'
+        trades:
+          type: array
+          items:
+            $ref: '#/components/schemas/BacktestTrade'
+        equity_curve:
+          type: array
+          items:
+            $ref: '#/components/schemas/EquityPoint'
+        created_at:
+          type: string
+          format: date-time
+        completed_at:
+          type: string
+          format: date-time
+
+    BacktestStatus:
+      type: object
+      properties:
+        job_id:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [queued, running, completed, failed]
+        progress:
+          type: object
+          properties:
+            current_date:
+              type: string
+              format: date
+            completion_percent:
+              type: number
+              example: 45.2
+            estimated_remaining:
+              type: string
+              example: "00:12:30"
+
+    BacktestSummary:
+      type: object
+      properties:
+        final_capital:
+          type: number
+          example: 1250000
+        total_return:
+          type: number
+          example: 250000
+        total_return_percent:
+          type: number
+          example: 25.0
+        max_drawdown:
+          type: number
+          example: -8.5
+        sharpe_ratio:
+          type: number
+          example: 1.45
+        win_rate:
+          type: number
+          example: 68.2
+        total_trades:
+          type: integer
+          example: 156
+
+    BacktestTrade:
+      type: object
+      properties:
+        date:
+          type: string
+          format: date
+        symbol:
+          type: string
+        action:
+          type: string
+          enum: [buy, sell]
+        quantity:
+          type: integer
+        price:
+          type: number
+        ai_decision:
+          type: object
+          properties:
+            decision:
+              type: string
+            confidence:
+              type: number
+
+    EquityPoint:
+      type: object
+      properties:
+        date:
+          type: string
+          format: date
+        value:
+          type: number
+        drawdown:
+          type: number
+
+    # Market Data Schemas
+    PriceData:
+      type: object
+      properties:
+        symbol:
+          type: string
+          example: "7203"
+        current_price:
+          type: number
+          example: 2650.0
+        change:
+          type: number
+          example: 25.0
+        change_percent:
+          type: number
+          example: 0.95
+        volume:
+          type: integer
+          example: 1234567
+        timestamp:
+          type: string
+          format: date-time
+      required:
+        - symbol
+        - current_price
+        - timestamp
+
+  # ===============================
+  # Common Responses
+  # ===============================
+  responses:
+    UnauthorizedError:
+      description: Authentication required
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetail'
+          example:
+            type: "https://kaboom-api.com/problems/auth/token-missing"
+            title: "Authentication Required"
+            status: 401
+            detail: "Bearer token is required for this endpoint"
+
+    ValidationError:
+      description: Request validation failed
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetail'
+          example:
+            type: "https://kaboom-api.com/problems/validation/invalid-value"
+            title: "Validation Failed"
+            status: 400
+            detail: "Invalid symbol format. Expected 4-digit Japanese stock code"
+
+    NotFoundError:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetail'
+          example:
+            type: "https://kaboom-api.com/problems/resource/not-found"
+            title: "Resource Not Found"
+            status: 404
+            detail: "Portfolio with ID 550e8400-e29b-41d4-a716-446655440000 not found"
+
+tags:
+  - name: Authentication
+    description: JWT token verification and user management
+  - name: Portfolios
+    description: Portfolio management operations
+  - name: AI Analysis
+    description: AI-powered stock analysis via OpenRouter
+  - name: Trading
+    description: Trade execution and management
+  - name: Backtesting
+    description: Strategy backtesting and performance analysis
+  - name: Market Data
+    description: Real-time market data and charts
