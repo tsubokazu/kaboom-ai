@@ -2,13 +2,25 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import JSONResponse
 from contextlib import asynccontextmanager
 import uvicorn
+import logging
 
 from app.config.settings import settings
-from app.middleware.cors import setup_cors
+from app.middleware.security import SecurityMiddleware
+from app.middleware.rate_limit import RateLimitMiddleware
+from app.routers.health import router as health_router
+from app.routers.auth import router as auth_router
+from app.routers.ai_analysis import router as ai_analysis_router
 from app.websocket.routes import router as websocket_router
 from app.websocket.manager import websocket_manager
 from app.services.routes import router as services_router
 from app.services.realtime_service import realtime_service
+
+# ログ設定
+logging.basicConfig(
+    level=logging.INFO if not settings.DEBUG else logging.DEBUG,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -45,18 +57,30 @@ app = FastAPI(
     redoc_url="/redoc" if settings.DEBUG else None
 )
 
-# Setup middleware
-setup_cors(app)
+# Setup middleware (順序重要)
+from fastapi.middleware.cors import CORSMiddleware
+
+# CORS設定
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=settings.ALLOWED_ORIGINS if not settings.DEBUG else ["*"],
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["*"],
+    max_age=3600,
+)
+
+app.add_middleware(SecurityMiddleware)  # セキュリティヘッダー
+app.add_middleware(RateLimitMiddleware)  # レート制限
 
 # Include routers
+app.include_router(health_router)  # ヘルスチェック
+app.include_router(auth_router)    # 認証
+app.include_router(ai_analysis_router)  # AI分析
 app.include_router(websocket_router, tags=["WebSocket"])
 app.include_router(services_router)
 
-# Health check endpoints
-@app.get("/health")
-async def health_check():
-    """Health check for CloudRun and load balancers"""
-    return {"status": "healthy", "service": "kaboom-api"}
+# Root endpoint only (health endpoints are in routers/health.py)
 
 @app.get("/")
 async def root():

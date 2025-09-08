@@ -26,9 +26,18 @@ class Settings:
     # Redis Configuration for WebSocket scaling
     REDIS_URL: str = os.getenv("REDIS_URL", "redis://localhost:6379")
     
-    # External APIs
+    # External APIs - OpenRouter Integration
+    OPENROUTER_API_KEY: Optional[str] = os.getenv("OPENROUTER_API_KEY")
+    OPENROUTER_BASE_URL: str = os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
+    OPENROUTER_DEBUG: bool = os.getenv("OPENROUTER_DEBUG", "False").lower() == "true"
+    OPENROUTER_LOG_REQUESTS: bool = os.getenv("OPENROUTER_LOG_REQUESTS", "True").lower() == "true"
+    OPENROUTER_COST_TRACKING: bool = os.getenv("OPENROUTER_COST_TRACKING", "True").lower() == "true"
+    
+    # Legacy API Keys (for fallback if needed)
     OPENAI_API_KEY: Optional[str] = os.getenv("OPENAI_API_KEY")
     GEMINI_API_KEY: Optional[str] = os.getenv("GEMINI_API_KEY")
+    
+    # Trading APIs
     TACHIBANA_API_KEY: Optional[str] = os.getenv("TACHIBANA_API_KEY")
     TACHIBANA_API_SECRET: Optional[str] = os.getenv("TACHIBANA_API_SECRET")
     
@@ -55,6 +64,14 @@ class Settings:
     
     # Rate Limiting
     RATE_LIMIT_PER_MINUTE: int = int(os.getenv("RATE_LIMIT_PER_MINUTE", "100"))
+    
+    # AI Configuration
+    MAX_CONCURRENT_AI_REQUESTS: int = int(os.getenv("MAX_CONCURRENT_AI_REQUESTS", "3"))
+    AI_ANALYSIS_TIMEOUT: int = int(os.getenv("AI_ANALYSIS_TIMEOUT", "180"))  # 3 minutes
+    OPENROUTER_CONCURRENT_REQUESTS: int = int(os.getenv("OPENROUTER_CONCURRENT_REQUESTS", "10"))
+    
+    # Application URL for OpenRouter headers
+    APP_URL: str = os.getenv("APP_URL", "https://kaboom-trading.com")
     
     @property
     def is_cloud_run(self) -> bool:
