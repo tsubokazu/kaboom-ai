@@ -10,6 +10,7 @@ from fastapi.responses import JSONResponse
 
 from app.config.settings import settings
 from app.services.openrouter_client import OpenRouterClient, AIRequest, AIAnalysisType
+from app.services.redis_client import get_redis_client, RedisClient
 from app.middleware.auth import get_admin_user, User
 
 router = APIRouter(tags=["Health"])
@@ -110,6 +111,69 @@ async def openrouter_health_check(admin_user: User = Depends(get_admin_user)):
             }
         )
 
+@router.get("/health/redis")
+async def redis_health_check(admin_user: User = Depends(get_admin_user)):
+    """Redis接続・機能ヘルスチェック"""
+    
+    start_time = time.time()
+    
+    try:
+        redis_client = await get_redis_client()
+        
+        # 基本接続テスト
+        health_status = await redis_client.health_check()
+        response_time = time.time() - start_time
+        
+        if health_status["status"] != "connected":
+            return JSONResponse(
+                status_code=503,
+                content={
+                    "status": "unhealthy",
+                    "error": health_status.get("error", "Connection failed"),
+                    "response_time": f"{response_time:.3f}s",
+                    "timestamp": datetime.utcnow().isoformat()
+                }
+            )
+        
+        # Redis機能テスト
+        test_key = f"health_check:{datetime.utcnow().timestamp()}"
+        test_value = {"test": "data", "timestamp": datetime.utcnow().isoformat()}
+        
+        # セット・ゲット・削除テスト
+        await redis_client.set_cache(test_key, test_value, expire_seconds=10)
+        retrieved_data = await redis_client.get_cache(test_key)
+        await redis_client.delete_cache(test_key)
+        
+        # テスト結果検証
+        test_passed = retrieved_data is not None and retrieved_data["test"] == "data"
+        
+        final_response_time = time.time() - start_time
+        
+        return {
+            "status": "healthy" if test_passed else "degraded",
+            "connection": health_status,
+            "function_test": {
+                "passed": test_passed,
+                "operations": ["set", "get", "delete"],
+                "test_key": test_key
+            },
+            "response_time": f"{final_response_time:.3f}s",
+            "timestamp": datetime.utcnow().isoformat()
+        }
+    
+    except Exception as e:
+        response_time = time.time() - start_time
+        
+        return JSONResponse(
+            status_code=503,
+            content={
+                "status": "unhealthy",
+                "error": str(e),
+                "response_time": f"{response_time:.3f}s",
+                "timestamp": datetime.utcnow().isoformat()
+            }
+        )
+
 # Readiness probe for Kubernetes
 @router.get("/ready")
 async def readiness_check():
@@ -120,6 +184,7 @@ async def readiness_check():
         checks = {
             "openrouter_config": bool(settings.OPENROUTER_API_KEY),
             "supabase_config": bool(settings.SUPABASE_URL and settings.SUPABASE_ANON_KEY),
+            "redis_config": bool(settings.REDIS_URL),
         }
         
         all_ready = all(checks.values())
@@ -228,12 +293,23 @@ async def _check_dependencies() -> Dict[str, Dict[str, Any]]:
         "url": settings.SUPABASE_URL if settings.SUPABASE_URL else "not_configured"
     }
     
-    # Redis check (if available)
-    dependencies["redis"] = {
-        "status": "unknown",  # TODO: 実際のRedis接続チェック
-        "configured": bool(settings.REDIS_URL),
-        "url": settings.REDIS_URL
-    }
+    # Redis check
+    try:
+        redis_client = await get_redis_client()
+        redis_health = await redis_client.health_check()
+        dependencies["redis"] = {
+            "status": "healthy" if redis_health["status"] == "connected" else "unhealthy",
+            "configured": bool(settings.REDIS_URL),
+            "url": settings.REDIS_URL,
+            "details": redis_health
+        }
+    except Exception as e:
+        dependencies["redis"] = {
+            "status": "unhealthy",
+            "configured": bool(settings.REDIS_URL),
+            "url": settings.REDIS_URL,
+            "error": str(e)
+        }
     
     return dependencies
 

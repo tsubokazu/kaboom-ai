@@ -5,8 +5,8 @@ from datetime import datetime
 import asyncio
 import logging
 from fastapi import WebSocket, WebSocketDisconnect
-import redis.asyncio as redis
 from app.config.settings import settings
+from app.services.redis_client import get_redis_client, RedisClient
 
 logger = logging.getLogger(__name__)
 
@@ -20,15 +20,14 @@ class WebSocketManager:
         self.active_connections: Dict[str, WebSocket] = {}
         self.connection_metadata: Dict[str, Dict[str, Any]] = {}
         self.subscriptions: Dict[str, Set[str]] = {}  # topic -> connection_ids
-        self.redis_client: Optional[redis.Redis] = None
+        self.redis_client: Optional[RedisClient] = None
         self.pubsub_task: Optional[asyncio.Task] = None
         self.heartbeat_task: Optional[asyncio.Task] = None
         
     async def startup(self):
         """起動時の初期化処理"""
         try:
-            self.redis_client = redis.from_url(settings.REDIS_URL)
-            await self.redis_client.ping()
+            self.redis_client = await get_redis_client()
             
             # Redis Pub/Sub リスナーを開始
             self.pubsub_task = asyncio.create_task(self._redis_listener())
@@ -49,7 +48,7 @@ class WebSocketManager:
         if self.heartbeat_task:
             self.heartbeat_task.cancel()
         if self.redis_client:
-            await self.redis_client.close()
+            await self.redis_client.disconnect()
         
         # 全接続を閉じる
         for connection_id in list(self.active_connections.keys()):
@@ -151,14 +150,17 @@ class WebSocketManager:
         """
         # Redis経由でクラスター全体に配信
         if self.redis_client:
-            redis_message = {
+            # 新しいRedisClientのPub/Sub機能を使用
+            channel = f"websocket_{topic or 'broadcast'}"
+            
+            broadcast_message = {
                 "message": message,
                 "topic": topic,
-                "sender_instance": id(self)
+                "sender_instance": id(self),
+                "timestamp": datetime.utcnow().isoformat()
             }
             
-            channel = f"kaboom:websocket:{topic or 'broadcast'}"
-            await self.redis_client.publish(channel, json.dumps(redis_message))
+            await self.redis_client.publish_message(channel, broadcast_message)
         
         # ローカルインスタンスの接続にも送信
         await self._send_to_local_connections(message, topic)
@@ -250,40 +252,41 @@ class WebSocketManager:
             logger.error(f"Error handling message from {connection_id}: {e}")
     
     async def _redis_listener(self):
-        """Redis Pub/Sub リスナー"""
+        """Redis Pub/Sub リスナー - 新しいRedisClientのsubscribe機能を使用"""
         if not self.redis_client:
             return
             
-        pubsub = self.redis_client.pubsub()
-        
         try:
-            # 全てのWebSocketチャンネルを購読
-            await pubsub.psubscribe("kaboom:websocket:*")
+            # WebSocketメッセージ処理コールバック
+            async def handle_websocket_message(data):
+                try:
+                    # 自分のインスタンスからの送信は無視
+                    if data.get("data", {}).get("sender_instance") == id(self):
+                        return
+                    
+                    message_data = data.get("data", {})
+                    
+                    # ローカル接続に転送
+                    await self._send_to_local_connections(
+                        message_data.get("message", {}),
+                        message_data.get("topic")
+                    )
+                    
+                except Exception as e:
+                    logger.error(f"Error processing WebSocket Redis message: {e}")
             
-            async for message in pubsub.listen():
-                if message["type"] == "pmessage":
-                    try:
-                        data = json.loads(message["data"])
-                        
-                        # 自分のインスタンスからの送信は無視
-                        if data.get("sender_instance") == id(self):
-                            continue
-                        
-                        # ローカル接続に転送
-                        await self._send_to_local_connections(
-                            data["message"],
-                            data.get("topic")
-                        )
-                        
-                    except Exception as e:
-                        logger.error(f"Error processing Redis message: {e}")
+            # 全てのWebSocketチャンネルを購読（パターンベース）
+            channels = ["websocket_broadcast", "websocket_price_update", "websocket_portfolio_update"]
+            
+            for channel in channels:
+                asyncio.create_task(
+                    self.redis_client.subscribe_channel(channel, handle_websocket_message)
+                )
                         
         except asyncio.CancelledError:
             logger.info("Redis listener cancelled")
         except Exception as e:
             logger.error(f"Redis listener error: {e}")
-        finally:
-            await pubsub.unsubscribe()
     
     async def _heartbeat_checker(self):
         """定期的にヘルスチェックを実行"""
@@ -320,6 +323,83 @@ class WebSocketManager:
             "redis_connected": self.redis_client is not None,
             "uptime": "N/A"  # TODO: 起動時刻から計算
         }
+    
+    # =============================================
+    # リアルタイム配信機能（Redis統合）
+    # =============================================
+    
+    async def send_price_update(self, symbol: str, price_data: Dict[str, Any]):
+        """株価更新をWebSocketクライアントに配信"""
+        message = {
+            "type": "price_update",
+            "payload": {
+                "symbol": symbol,
+                "price": price_data.get("price"),
+                "change": price_data.get("change"),
+                "change_percent": price_data.get("change_percent"),
+                "volume": price_data.get("volume"),
+                "timestamp": price_data.get("timestamp", datetime.utcnow().isoformat())
+            }
+        }
+        
+        # Redis経由でクラスター配信 + ローカル配信
+        await self.broadcast(message, f"price:{symbol}")
+        
+        # Redis直接配信（キャッシュ更新と同期）
+        if self.redis_client:
+            await self.redis_client.publish_price_update(symbol, message["payload"])
+    
+    async def send_portfolio_update(self, user_id: str, portfolio_data: Dict[str, Any]):
+        """ポートフォリオ更新を特定ユーザーに配信"""
+        message = {
+            "type": "portfolio_update",
+            "payload": portfolio_data
+        }
+        
+        # ユーザー固有のトピックにブロードキャスト
+        await self.broadcast(message, f"user:{user_id}")
+        
+        # Redis直接配信
+        if self.redis_client:
+            await self.redis_client.publish_portfolio_update(user_id, portfolio_data)
+    
+    async def send_ai_analysis_result(self, request_id: str, user_id: str, analysis_result: Dict[str, Any]):
+        """AI分析完了結果を配信"""
+        message = {
+            "type": "ai_analysis_complete",
+            "payload": {
+                "request_id": request_id,
+                "analysis": analysis_result,
+                "timestamp": datetime.utcnow().isoformat()
+            }
+        }
+        
+        # リクエストユーザーに配信
+        await self.broadcast(message, f"user:{user_id}")
+        
+        # Redis直接配信
+        if self.redis_client:
+            await self.redis_client.publish_ai_analysis_complete(request_id, analysis_result)
+    
+    async def send_system_notification(self, notification_data: Dict[str, Any], target_users: Optional[List[str]] = None):
+        """システム通知配信"""
+        message = {
+            "type": "system_notification",
+            "payload": {
+                "title": notification_data.get("title", "お知らせ"),
+                "message": notification_data.get("message", ""),
+                "level": notification_data.get("level", "info"),  # info, warning, error, success
+                "timestamp": datetime.utcnow().isoformat()
+            }
+        }
+        
+        if target_users:
+            # 特定ユーザーに配信
+            for user_id in target_users:
+                await self.broadcast(message, f"user:{user_id}")
+        else:
+            # 全体配信
+            await self.broadcast(message)
 
 # グローバルWebSocketマネージャーインスタンス
 websocket_manager = WebSocketManager()

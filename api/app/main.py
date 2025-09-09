@@ -10,10 +10,13 @@ from app.middleware.rate_limit import RateLimitMiddleware
 from app.routers.health import router as health_router
 from app.routers.auth import router as auth_router
 from app.routers.ai_analysis import router as ai_analysis_router
+from app.routers.portfolios import router as portfolios_router
+from app.routers.trades import router as trades_router
 from app.websocket.routes import router as websocket_router
 from app.websocket.manager import websocket_manager
 from app.services.routes import router as services_router
 from app.services.realtime_service import realtime_service
+from app.services.redis_client import redis_client
 
 # ログ設定
 logging.basicConfig(
@@ -30,6 +33,10 @@ async def lifespan(app: FastAPI):
     print(f"   - Debug: {settings.DEBUG}")
     print(f"   - CloudRun: {settings.is_cloud_run}")
     
+    # Redis接続初期化
+    await redis_client.connect()
+    print("   - Redis Client connected")
+    
     # WebSocketマネージャー起動
     await websocket_manager.startup()
     print("   - WebSocket Manager initialized")
@@ -45,6 +52,11 @@ async def lifespan(app: FastAPI):
     print("   - Realtime Service stopped")
     
     await websocket_manager.shutdown()
+    print("   - WebSocket Manager shutdown")
+    
+    await redis_client.disconnect()
+    print("   - Redis Client disconnected")
+    
     print("🔽 Shutting down Kaboom Stock Trading API")
 
 # Create FastAPI app
@@ -77,6 +89,8 @@ app.add_middleware(RateLimitMiddleware)  # レート制限
 app.include_router(health_router)  # ヘルスチェック
 app.include_router(auth_router)    # 認証
 app.include_router(ai_analysis_router)  # AI分析
+app.include_router(portfolios_router)  # ポートフォリオ管理
+app.include_router(trades_router)      # 取引管理
 app.include_router(websocket_router, tags=["WebSocket"])
 app.include_router(services_router)
 
