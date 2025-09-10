@@ -14,25 +14,63 @@ import psutil
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Any
 import numpy as np
-import yfinance as yf
 
 from app.tasks.celery_app import celery_app
 from app.services.redis_client import get_redis_client
+from app.services.market_data_service import market_data_service
 from app.websocket.manager import websocket_manager
 
 logger = logging.getLogger(__name__)
+
+
+@celery_app.task(name="market_data.update_stock_price", queue="market_data")
+def update_stock_price_task(symbol: str, force_update: bool = False) -> Dict[str, Any]:
+    """単一銘柄の価格データ更新タスク"""
+    try:
+        price_data = asyncio.run(market_data_service.get_stock_price(symbol, force_update))
+        
+        return {
+            "status": "success",
+            "symbol": symbol,
+            "data": price_data,
+            "timestamp": datetime.utcnow().isoformat()
+        }
+        
+    except Exception as e:
+        logger.error(f"Stock price update task failed for {symbol}: {e}")
+        return {
+            "status": "error",
+            "symbol": symbol,
+            "error": str(e),
+            "timestamp": datetime.utcnow().isoformat()
+        }
 
 
 @celery_app.task(name="market_data.update_all_stock_prices", queue="market_data")
 def update_all_stock_prices() -> Dict[str, Any]:
     """全監視銘柄の価格データ更新タスク"""
     try:
-        updated_symbols = asyncio.run(_update_stock_prices_async())
+        # 主要日本株銘柄リスト
+        default_symbols = [
+            "7203.T",   # トヨタ自動車
+            "6758.T",   # ソニーグループ
+            "9984.T",   # ソフトバンクグループ
+            "8306.T",   # 三菱UFJフィナンシャル・グループ
+            "6861.T",   # キーエンス
+            "4519.T",   # 中外製薬
+            "8058.T",   # 三菱商事
+            "6954.T",   # ファナック
+            "4661.T",   # オリエンタルランド
+            "9983.T"    # ファーストリテイリング
+        ]
+        
+        updated_data = asyncio.run(market_data_service.get_multiple_stock_prices(default_symbols))
         
         return {
             "status": "success",
-            "updated_symbols": len(updated_symbols),
-            "symbols": updated_symbols,
+            "updated_symbols": len(updated_data),
+            "symbols": list(updated_data.keys()),
+            "data": updated_data,
             "timestamp": datetime.utcnow().isoformat()
         }
         
@@ -40,6 +78,29 @@ def update_all_stock_prices() -> Dict[str, Any]:
         logger.error(f"Stock price update task failed: {e}")
         return {
             "status": "error",
+            "error": str(e),
+            "timestamp": datetime.utcnow().isoformat()
+        }
+
+
+@celery_app.task(name="market_data.update_technical_indicators", queue="market_data")
+def update_technical_indicators_task(symbol: str) -> Dict[str, Any]:
+    """テクニカル指標更新タスク"""
+    try:
+        indicators = asyncio.run(market_data_service.get_technical_indicators(symbol))
+        
+        return {
+            "status": "success",
+            "symbol": symbol,
+            "indicators": indicators,
+            "timestamp": datetime.utcnow().isoformat()
+        }
+        
+    except Exception as e:
+        logger.error(f"Technical indicators update failed for {symbol}: {e}")
+        return {
+            "status": "error",
+            "symbol": symbol,
             "error": str(e),
             "timestamp": datetime.utcnow().isoformat()
         }

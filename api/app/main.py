@@ -10,13 +10,14 @@ from app.middleware.rate_limit import RateLimitMiddleware
 from app.routers.health import router as health_router
 from app.routers.auth import router as auth_router
 from app.routers.ai_analysis import router as ai_analysis_router
-from app.routers.portfolios import router as portfolios_router
-from app.routers.trades import router as trades_router
+from app.routers.portfolios_db import router as portfolios_router
+from app.routers.trades_db import router as trades_router
 from app.websocket.routes import router as websocket_router
 from app.websocket.manager import websocket_manager
 from app.services.routes import router as services_router
 from app.services.realtime_service import realtime_service
 from app.services.redis_client import redis_client
+from app.database.connection import init_database, close_database
 
 # ログ設定
 logging.basicConfig(
@@ -32,6 +33,10 @@ async def lifespan(app: FastAPI):
     print(f"   - Host: {settings.API_HOST}:{settings.API_PORT}")
     print(f"   - Debug: {settings.DEBUG}")
     print(f"   - CloudRun: {settings.is_cloud_run}")
+    
+    # データベース初期化
+    await init_database()
+    print("   - Database initialized")
     
     # Redis接続初期化
     await redis_client.connect()
@@ -56,6 +61,9 @@ async def lifespan(app: FastAPI):
     
     await redis_client.disconnect()
     print("   - Redis Client disconnected")
+    
+    await close_database()
+    print("   - Database connections closed")
     
     print("🔽 Shutting down Kaboom Stock Trading API")
 

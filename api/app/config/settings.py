@@ -23,6 +23,10 @@ class Settings:
     SUPABASE_ANON_KEY: str = os.getenv("SUPABASE_ANON_KEY", "")
     SUPABASE_SERVICE_ROLE_KEY: str = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
     
+    # Database Configuration (PostgreSQL via Supabase)
+    DATABASE_URL: str = os.getenv("DATABASE_URL", "")
+    DB_ECHO: bool = os.getenv("DB_ECHO", "False").lower() == "true"
+    
     # Redis Configuration for WebSocket scaling
     REDIS_URL: str = os.getenv("REDIS_URL", "redis://localhost:6379")
     
