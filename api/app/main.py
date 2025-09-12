@@ -10,6 +10,9 @@ from app.middleware.rate_limit import RateLimitMiddleware
 from app.routers.health import router as health_router
 from app.routers.auth import router as auth_router
 from app.routers.ai_analysis import router as ai_analysis_router
+from app.routers.admin import router as admin_router
+from app.routers.trading_integration import router as trading_router
+from app.routers.frontend_integration import router as frontend_router
 from app.routers.portfolios_db import router as portfolios_router
 from app.routers.trades_db import router as trades_router
 from app.websocket.routes import router as websocket_router
@@ -50,11 +53,21 @@ async def lifespan(app: FastAPI):
     await realtime_service.start()
     print("   - Realtime Service started")
     
+    # 監視サービス起動
+    from app.services.monitoring_service import monitoring_service
+    await monitoring_service.start_monitoring()
+    print("   - Monitoring Service started")
+    
     yield
     
     # サービス終了処理
     await realtime_service.stop()
     print("   - Realtime Service stopped")
+    
+    # 監視サービス停止
+    from app.services.monitoring_service import monitoring_service
+    await monitoring_service.stop_monitoring()
+    print("   - Monitoring Service stopped")
     
     await websocket_manager.shutdown()
     print("   - WebSocket Manager shutdown")
@@ -97,6 +110,9 @@ app.add_middleware(RateLimitMiddleware)  # レート制限
 app.include_router(health_router)  # ヘルスチェック
 app.include_router(auth_router)    # 認証
 app.include_router(ai_analysis_router)  # AI分析
+app.include_router(admin_router)   # 管理ダッシュボード
+app.include_router(trading_router) # 外部取引所統合
+app.include_router(frontend_router) # フロントエンド統合
 app.include_router(portfolios_router)  # ポートフォリオ管理
 app.include_router(trades_router)      # 取引管理
 app.include_router(websocket_router, tags=["WebSocket"])

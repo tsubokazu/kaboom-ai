@@ -1,368 +1,339 @@
 # app/routers/ai_analysis.py
 
+from fastapi import APIRouter, HTTPException, BackgroundTasks, Query, Depends
+from pydantic import BaseModel, Field
+from typing import Dict, List, Optional, Any
+from datetime import datetime
 import logging
-from datetime import datetime, timedelta
-from typing import Dict, List, Any, Optional
-from uuid import uuid4
 
-from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks
-from pydantic import BaseModel, Field, validator
-
-from app.middleware.auth import get_current_user, get_premium_user, User
-from app.services.openrouter_client import (
-    AIRequest, 
-    AIResponse, 
-    AIAnalysisType, 
-    AIAnalysisService,
-    generate_idempotency_key
+from app.services.advanced_ai_service import (
+    AdvancedAIService, ConsensusResult, ConsensusStrategy, ModelWeight,
+    ModelOptimizer
 )
+from app.services.market_data_service import market_data_service
+from app.middleware.auth import get_current_user
+from app.models.user import User
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1/ai", tags=["AI Analysis"])
 
-# Request/Response Models
-class AIAnalysisRequest(BaseModel):
-    symbol: str = Field(..., pattern=r'^[0-9]{4}$', description="4-digit Japanese stock code")
-    symbol_name: Optional[str] = Field(None, max_length=200, description="Optional symbol name")
-    analysis_types: List[str] = Field(..., min_items=1, max_items=3)
-    models: Optional[List[str]] = Field(None, description="Specific OpenRouter models to use")
-    timeframes: List[str] = Field(["1h", "4h", "1d"], min_items=1, max_items=6)
-    include_chart: bool = Field(True, description="Generate chart images for analysis")
-    priority: str = Field("normal", pattern=r'^(low|normal|high|urgent)$')
-    
-    @validator('analysis_types')
-    def validate_analysis_types(cls, v):
-        valid_types = ['technical', 'sentiment', 'risk']
-        for analysis_type in v:
-            if analysis_type not in valid_types:
-                raise ValueError(f'Invalid analysis type: {analysis_type}')
-        return v
-    
-    @validator('timeframes')
-    def validate_timeframes(cls, v):
-        valid_frames = ['1m', '5m', '15m', '1h', '4h', '1d', '1w']
-        for frame in v:
-            if frame not in valid_frames:
-                raise ValueError(f'Invalid timeframe: {frame}')
-        return v
+# Pydantic Models
+class ConsensusAnalysisRequest(BaseModel):
+    symbol: str = Field(..., description="銘柄コード")
+    strategy: ConsensusStrategy = Field(ConsensusStrategy.WEIGHTED_AVERAGE, description="合意戦略")
+    cache_minutes: int = Field(30, ge=1, le=1440, description="キャッシュ時間（分）")
+    include_chart_analysis: bool = Field(False, description="チャート画像分析を含める")
 
-class AIModelResultResponse(BaseModel):
-    model: str
-    analysis_type: str
-    decision: str
-    confidence: float
-    reasoning: str
-    cost_usd: float
-    processing_time: float
+class ModelWeightRequest(BaseModel):
+    technical_weight: float = Field(1.0, ge=0.1, le=2.0)
+    sentiment_weight: float = Field(1.0, ge=0.1, le=2.0) 
+    risk_weight: float = Field(1.0, ge=0.1, le=2.0)
+    general_weight: float = Field(0.5, ge=0.1, le=2.0)
 
-class AIAnalysisResponse(BaseModel):
-    job_id: str
-    status: str
-    symbol: str
-    estimated_completion: Optional[str] = None
-    model_results: Optional[List[AIModelResultResponse]] = None
-    final_decision: Optional[str] = None
-    consensus_confidence: Optional[float] = None
-    total_cost: Optional[float] = None
-    created_at: str
-    completed_at: Optional[str] = None
+class BatchAnalysisRequest(BaseModel):
+    symbols: List[str] = Field(..., max_items=10, description="分析する銘柄リスト（最大10）")
+    strategy: ConsensusStrategy = Field(ConsensusStrategy.WEIGHTED_AVERAGE)
+    cache_minutes: int = Field(30, ge=1, le=1440)
 
-# 分析ジョブストレージ（実際にはRedis/DBを使用）
-analysis_jobs: Dict[str, Dict[str, Any]] = {}
-
-@router.post("/analyze", response_model=AIAnalysisResponse)
-async def submit_ai_analysis(
-    request: AIAnalysisRequest,
+# API Endpoints
+@router.post("/consensus-analysis", response_model=Dict[str, Any])
+async def multi_model_consensus_analysis(
+    request: ConsensusAnalysisRequest,
     background_tasks: BackgroundTasks,
     current_user: User = Depends(get_current_user)
 ):
-    """AI分析ジョブ投入"""
-    
-    # クォータチェック (簡易実装)
-    daily_usage = await _check_user_daily_ai_usage(current_user.id)
-    max_daily_analyses = _get_user_ai_quota(current_user.role)
-    
-    if daily_usage >= max_daily_analyses:
-        raise HTTPException(
-            status_code=429,
-            detail=f"Daily AI analysis quota exceeded. Limit: {max_daily_analyses}, Used: {daily_usage}"
+    """マルチモデル合意分析"""
+    try:
+        # 市場データ取得
+        market_data = await market_data_service.get_comprehensive_data(request.symbol)
+        
+        # AI分析実行
+        async with AdvancedAIService() as ai_service:
+            result = await ai_service.multi_model_consensus_analysis(
+                symbol=request.symbol,
+                market_data=market_data,
+                strategy=request.strategy,
+                cache_minutes=request.cache_minutes
+            )
+        
+        # 分析ログ記録（バックグラウンド）
+        background_tasks.add_task(
+            _log_analysis_result,
+            current_user.id,
+            request.symbol,
+            result
         )
-    
-    # 冪等性チェック
-    idempotency_key = generate_idempotency_key(
-        request.symbol,
-        {"types": request.analysis_types, "models": request.models or []}
-    )
-    
-    existing_job = await _check_existing_analysis(idempotency_key)
-    if existing_job:
-        return AIAnalysisResponse(**existing_job)
-    
-    # ジョブID生成
-    job_id = str(uuid4())
-    
-    # ジョブ初期状態作成
-    job_data = {
-        "job_id": job_id,
-        "status": "queued",
-        "symbol": request.symbol,
-        "user_id": current_user.id,
-        "request_data": request.dict(),
-        "created_at": datetime.utcnow().isoformat(),
-        "estimated_completion": (datetime.utcnow() + timedelta(minutes=2)).isoformat(),
-        "idempotency_key": idempotency_key
-    }
-    
-    # ジョブストレージに保存
-    analysis_jobs[job_id] = job_data
-    
-    # バックグラウンドタスクで分析実行
-    background_tasks.add_task(
-        _execute_ai_analysis_task,
-        job_id,
-        request,
-        current_user.id
-    )
-    
-    return AIAnalysisResponse(
-        job_id=job_id,
-        status="queued",
-        symbol=request.symbol,
-        estimated_completion=job_data["estimated_completion"],
-        created_at=job_data["created_at"]
-    )
+        
+        return {
+            "symbol": request.symbol,
+            "analysis_result": {
+                "final_decision": result.final_decision,
+                "consensus_confidence": result.consensus_confidence,
+                "reasoning": result.reasoning,
+                "agreement_level": result.agreement_level,
+                "processing_time": result.processing_time,
+                "total_cost": result.total_cost,
+                "timestamp": result.timestamp.isoformat()
+            },
+            "detailed_analysis": {
+                "technical": {
+                    "decision": result.technical_analysis.decision if result.technical_analysis else None,
+                    "confidence": result.technical_analysis.confidence if result.technical_analysis else None,
+                    "reasoning": result.technical_analysis.reasoning if result.technical_analysis else None
+                } if result.technical_analysis else None,
+                "sentiment": {
+                    "decision": result.sentiment_analysis.decision if result.sentiment_analysis else None,
+                    "confidence": result.sentiment_analysis.confidence if result.sentiment_analysis else None,
+                    "reasoning": result.sentiment_analysis.reasoning if result.sentiment_analysis else None
+                } if result.sentiment_analysis else None,
+                "risk": {
+                    "decision": result.risk_analysis.decision if result.risk_analysis else None,
+                    "confidence": result.risk_analysis.confidence if result.risk_analysis else None,
+                    "reasoning": result.risk_analysis.reasoning if result.risk_analysis else None
+                } if result.risk_analysis else None
+            },
+            "statistics": {
+                "confidence_distribution": result.confidence_distribution,
+                "decision_breakdown": result.decision_breakdown,
+                "model_count": len(result.individual_results)
+            },
+            "market_context": market_data
+        }
+        
+    except Exception as e:
+        logger.error(f"Consensus analysis failed for {request.symbol}: {e}")
+        raise HTTPException(status_code=500, detail=f"AI分析でエラーが発生しました: {str(e)}")
 
-@router.get("/analysis/{job_id}", response_model=AIAnalysisResponse)
-async def get_ai_analysis_result(
-    job_id: str,
+@router.post("/batch-analysis", response_model=Dict[str, Any])
+async def batch_consensus_analysis(
+    request: BatchAnalysisRequest,
+    background_tasks: BackgroundTasks,
     current_user: User = Depends(get_current_user)
 ):
-    """AI分析結果取得"""
+    """複数銘柄の一括AI分析"""
+    if not current_user.is_premium:
+        raise HTTPException(status_code=403, detail="プレミアムユーザーのみ利用可能です")
     
-    if job_id not in analysis_jobs:
-        raise HTTPException(
-            status_code=404,
-            detail="AI analysis job not found"
+    try:
+        results = {}
+        total_cost = 0.0
+        processing_start = datetime.utcnow()
+        
+        async with AdvancedAIService() as ai_service:
+            for symbol in request.symbols:
+                try:
+                    market_data = await market_data_service.get_comprehensive_data(symbol)
+                    
+                    result = await ai_service.multi_model_consensus_analysis(
+                        symbol=symbol,
+                        market_data=market_data,
+                        strategy=request.strategy,
+                        cache_minutes=request.cache_minutes
+                    )
+                    
+                    results[symbol] = {
+                        "decision": result.final_decision,
+                        "confidence": result.consensus_confidence,
+                        "reasoning": result.reasoning,
+                        "agreement_level": result.agreement_level,
+                        "cost": result.total_cost
+                    }
+                    
+                    total_cost += result.total_cost
+                    
+                except Exception as e:
+                    logger.error(f"Analysis failed for {symbol}: {e}")
+                    results[symbol] = {
+                        "error": str(e),
+                        "decision": "hold",
+                        "confidence": 0.0
+                    }
+        
+        processing_time = (datetime.utcnow() - processing_start).total_seconds()
+        
+        # 分析ログ記録
+        background_tasks.add_task(
+            _log_batch_analysis,
+            current_user.id,
+            request.symbols,
+            results,
+            total_cost
         )
-    
-    job_data = analysis_jobs[job_id]
-    
-    # 認可チェック
-    if job_data["user_id"] != current_user.id:
-        raise HTTPException(
-            status_code=403,
-            detail="Access denied to this analysis job"
-        )
-    
-    return AIAnalysisResponse(**job_data)
+        
+        return {
+            "symbols": request.symbols,
+            "results": results,
+            "summary": {
+                "total_cost": total_cost,
+                "processing_time": processing_time,
+                "success_count": len([r for r in results.values() if "error" not in r]),
+                "error_count": len([r for r in results.values() if "error" in r])
+            },
+            "timestamp": datetime.utcnow().isoformat()
+        }
+        
+    except Exception as e:
+        logger.error(f"Batch analysis failed: {e}")
+        raise HTTPException(status_code=500, detail=f"一括分析でエラーが発生しました: {str(e)}")
 
-@router.get("/decisions")
-async def get_ai_analysis_history(
-    symbol: Optional[str] = None,
-    start_date: Optional[str] = None,
-    end_date: Optional[str] = None,
-    page: int = 1,
-    limit: int = 20,
+@router.get("/model-performance", response_model=Dict[str, Any])
+async def get_model_performance_stats(
+    days: int = Query(30, ge=1, le=365, description="統計期間（日数）"),
+    current_user: User = Depends(get_current_user)
+):
+    """AIモデルパフォーマンス統計"""
+    try:
+        async with AdvancedAIService() as ai_service:
+            stats = await ai_service.get_model_performance_stats(days)
+        
+        return {
+            "performance_stats": stats,
+            "period_days": days,
+            "timestamp": datetime.utcnow().isoformat()
+        }
+        
+    except Exception as e:
+        logger.error(f"Failed to get model performance stats: {e}")
+        raise HTTPException(status_code=500, detail="統計取得でエラーが発生しました")
+
+@router.post("/optimize-weights", response_model=Dict[str, Any])
+async def optimize_model_weights(
+    days: int = Query(90, ge=30, le=365),
+    current_user: User = Depends(get_current_user)
+):
+    """モデル重み自動最適化"""
+    if not current_user.is_premium:
+        raise HTTPException(status_code=403, detail="プレミアムユーザーのみ利用可能です")
+    
+    try:
+        optimizer = ModelOptimizer()
+        
+        # 過去のデータを取得（実装要）
+        historical_data = []  # TODO: 実際の履歴データ取得
+        
+        optimized_weights = await optimizer.optimize_weights(historical_data)
+        
+        return {
+            "optimized_weights": {
+                "technical_weight": optimized_weights.technical_weight,
+                "sentiment_weight": optimized_weights.sentiment_weight,
+                "risk_weight": optimized_weights.risk_weight,
+                "general_weight": optimized_weights.general_weight
+            },
+            "optimization_period": days,
+            "timestamp": datetime.utcnow().isoformat(),
+            "recommendation": "最適化された重みを使用することで分析精度の向上が期待されます"
+        }
+        
+    except Exception as e:
+        logger.error(f"Weight optimization failed: {e}")
+        raise HTTPException(status_code=500, detail="重み最適化でエラーが発生しました")
+
+@router.get("/analysis-history", response_model=Dict[str, Any])
+async def get_analysis_history(
+    symbol: Optional[str] = Query(None, description="銘柄コード（指定時は該当銘柄のみ）"),
+    days: int = Query(7, ge=1, le=30, description="取得期間（日数）"),
+    limit: int = Query(50, ge=1, le=100, description="最大取得件数"),
     current_user: User = Depends(get_current_user)
 ):
     """AI分析履歴取得"""
-    
-    # ユーザーの分析ジョブを検索
-    user_jobs = [
-        job for job in analysis_jobs.values() 
-        if job["user_id"] == current_user.id and job["status"] == "completed"
-    ]
-    
-    # フィルタリング
-    if symbol:
-        user_jobs = [job for job in user_jobs if job["symbol"] == symbol]
-    
-    # TODO: date filtering implementation
-    
-    # ページネーション
-    start_idx = (page - 1) * limit
-    end_idx = start_idx + limit
-    paginated_jobs = user_jobs[start_idx:end_idx]
-    
-    return {
-        "items": paginated_jobs,
-        "total": len(user_jobs),
-        "page": page,
-        "limit": limit
-    }
-
-@router.delete("/analysis/{job_id}")
-async def cancel_ai_analysis(
-    job_id: str,
-    current_user: User = Depends(get_current_user)
-):
-    """AI分析ジョブキャンセル"""
-    
-    if job_id not in analysis_jobs:
-        raise HTTPException(
-            status_code=404,
-            detail="AI analysis job not found"
-        )
-    
-    job_data = analysis_jobs[job_id]
-    
-    # 認可チェック
-    if job_data["user_id"] != current_user.id:
-        raise HTTPException(
-            status_code=403,
-            detail="Access denied to this analysis job"
-        )
-    
-    # 実行中のジョブのみキャンセル可能
-    if job_data["status"] in ["queued", "processing"]:
-        job_data["status"] = "cancelled"
-        job_data["cancelled_at"] = datetime.utcnow().isoformat()
-        
-        return {"message": "AI analysis job cancelled successfully"}
-    else:
-        raise HTTPException(
-            status_code=409,
-            detail=f"Cannot cancel job in status: {job_data['status']}"
-        )
-
-@router.get("/quota")
-async def get_user_ai_quota(current_user: User = Depends(get_current_user)):
-    """ユーザーAIクォータ状況取得"""
-    
-    daily_usage = await _check_user_daily_ai_usage(current_user.id)
-    monthly_usage = await _check_user_monthly_ai_usage(current_user.id)
-    
-    max_daily = _get_user_ai_quota(current_user.role)
-    max_monthly = max_daily * 30  # 簡易計算
-    
-    return {
-        "user_role": current_user.role,
-        "daily_quota": {
-            "used": daily_usage,
-            "limit": max_daily,
-            "remaining": max(0, max_daily - daily_usage)
-        },
-        "monthly_quota": {
-            "used": monthly_usage,
-            "limit": max_monthly,
-            "remaining": max(0, max_monthly - monthly_usage)
-        }
-    }
-
-# バックグラウンドタスク
-async def _execute_ai_analysis_task(job_id: str, request: AIAnalysisRequest, user_id: str):
-    """AI分析実行タスク"""
-    
     try:
-        # ジョブ状況更新
-        analysis_jobs[job_id]["status"] = "processing"
-        analysis_jobs[job_id]["started_at"] = datetime.utcnow().isoformat()
+        # Redis から分析履歴を取得（実装要）
+        # ここでは概要のみ
         
-        logger.info(f"Starting AI analysis job {job_id} for user {user_id}, symbol {request.symbol}")
+        history = {
+            "analyses": [],  # 実際の履歴データ
+            "summary": {
+                "total_count": 0,
+                "success_rate": 0.0,
+                "avg_processing_time": 0.0,
+                "total_cost": 0.0
+            },
+            "filter": {
+                "symbol": symbol,
+                "days": days,
+                "limit": limit
+            },
+            "timestamp": datetime.utcnow().isoformat()
+        }
         
-        # AI分析実行
-        results = []
-        total_cost = 0.0
-        
-        async with AIAnalysisService() as ai_service:
-            for analysis_type in request.analysis_types:
-                ai_request = AIRequest(
-                    analysis_type=AIAnalysisType(analysis_type),
-                    symbol=request.symbol,
-                    prompt=f"銘柄{request.symbol}の{analysis_type}分析を実行してください。現在価格情報に基づく投資判断をお願いします。"
-                )
-                
-                try:
-                    response = await ai_service.analyze_with_fallback(ai_request)
-                    
-                    results.append(AIModelResultResponse(
-                        model=response.model,
-                        analysis_type=analysis_type,
-                        decision=response.decision,
-                        confidence=response.confidence,
-                        reasoning=response.reasoning,
-                        cost_usd=response.cost_usd,
-                        processing_time=response.processing_time
-                    ))
-                    
-                    total_cost += response.cost_usd
-                    
-                except Exception as e:
-                    logger.error(f"AI analysis failed for {analysis_type}: {e}")
-                    # 部分的な失敗は続行
-        
-        # 合意形成
-        if results:
-            decisions = [r.decision for r in results]
-            final_decision = max(set(decisions), key=decisions.count)  # 多数決
-            consensus_confidence = sum(r.confidence for r in results) / len(results)
-        else:
-            final_decision = "hold"
-            consensus_confidence = 0.5
-        
-        # ジョブ完了更新
-        analysis_jobs[job_id].update({
-            "status": "completed",
-            "model_results": [result.dict() for result in results],
-            "final_decision": final_decision,
-            "consensus_confidence": consensus_confidence,
-            "total_cost": total_cost,
-            "completed_at": datetime.utcnow().isoformat()
-        })
-        
-        logger.info(f"AI analysis job {job_id} completed successfully. Decision: {final_decision}")
+        return history
         
     except Exception as e:
-        logger.error(f"AI analysis job {job_id} failed: {e}", exc_info=True)
+        logger.error(f"Failed to get analysis history: {e}")
+        raise HTTPException(status_code=500, detail="履歴取得でエラーが発生しました")
+
+class CustomAnalysisRequest(BaseModel):
+    symbol: str = Field(..., description="銘柄コード")
+    custom_prompt: str = Field(..., min_length=10, max_length=1000, description="カスタムプロンプト")
+    model_weights: ModelWeightRequest = Field(default_factory=ModelWeightRequest)
+
+@router.post("/custom-analysis", response_model=Dict[str, Any])
+async def custom_ai_analysis(
+    request: CustomAnalysisRequest,
+    current_user: User = Depends(get_current_user)
+):
+    """カスタムAI分析（プレミアム機能）"""
+    if not current_user.is_premium:
+        raise HTTPException(status_code=403, detail="プレミアムユーザーのみ利用可能です")
+    
+    try:
+        # カスタム重みでAI分析実行
+        weights = ModelWeight(
+            technical_weight=request.model_weights.technical_weight,
+            sentiment_weight=request.model_weights.sentiment_weight,
+            risk_weight=request.model_weights.risk_weight,
+            general_weight=request.model_weights.general_weight
+        )
         
-        analysis_jobs[job_id].update({
-            "status": "failed",
-            "error": str(e),
-            "failed_at": datetime.utcnow().isoformat()
-        })
+        market_data = await market_data_service.get_comprehensive_data(request.symbol)
+        market_data["custom_prompt"] = request.custom_prompt
+        
+        async with AdvancedAIService(weights) as ai_service:
+            result = await ai_service.multi_model_consensus_analysis(
+                symbol=request.symbol,
+                market_data=market_data,
+                strategy=ConsensusStrategy.WEIGHTED_AVERAGE
+            )
+        
+        return {
+            "symbol": request.symbol,
+            "custom_prompt": request.custom_prompt,
+            "model_weights": request.model_weights.dict(),
+            "result": {
+                "decision": result.final_decision,
+                "confidence": result.consensus_confidence,
+                "reasoning": result.reasoning,
+                "processing_time": result.processing_time,
+                "cost": result.total_cost
+            },
+            "timestamp": datetime.utcnow().isoformat()
+        }
+        
+    except Exception as e:
+        logger.error(f"Custom analysis failed for {request.symbol}: {e}")
+        raise HTTPException(status_code=500, detail="カスタム分析でエラーが発生しました")
 
-# ヘルパー関数
-async def _check_user_daily_ai_usage(user_id: str) -> int:
-    """ユーザーの日次AI使用量チェック（簡易実装）"""
-    # 実際にはRedis/DBから取得
-    today = datetime.utcnow().strftime("%Y-%m-%d")
-    daily_jobs = [
-        job for job in analysis_jobs.values()
-        if job["user_id"] == user_id and job["created_at"].startswith(today)
-    ]
-    return len(daily_jobs)
+# Helper Functions
+async def _log_analysis_result(user_id: str, symbol: str, result: ConsensusResult):
+    """分析結果ログ記録"""
+    try:
+        # データベースまたはRedisに記録
+        logger.info(f"Analysis logged: user={user_id}, symbol={symbol}, decision={result.final_decision}")
+    except Exception as e:
+        logger.error(f"Failed to log analysis result: {e}")
 
-async def _check_user_monthly_ai_usage(user_id: str) -> int:
-    """ユーザーの月次AI使用量チェック（簡易実装）"""
-    # 実際にはRedis/DBから取得
-    current_month = datetime.utcnow().strftime("%Y-%m")
-    monthly_jobs = [
-        job for job in analysis_jobs.values()
-        if job["user_id"] == user_id and job["created_at"].startswith(current_month)
-    ]
-    return len(monthly_jobs)
+async def _log_batch_analysis(user_id: str, symbols: List[str], results: Dict, total_cost: float):
+    """一括分析ログ記録"""
+    try:
+        logger.info(f"Batch analysis logged: user={user_id}, symbols={len(symbols)}, cost=${total_cost:.4f}")
+    except Exception as e:
+        logger.error(f"Failed to log batch analysis: {e}")
 
-def _get_user_ai_quota(user_role: str) -> int:
-    """ユーザー役割別AI分析クォータ取得"""
-    quotas = {
-        "basic": 10,
-        "premium": 100,
-        "enterprise": 1000,
-        "admin": 10000
-    }
-    return quotas.get(user_role, 10)
-
-async def _check_existing_analysis(idempotency_key: str) -> Optional[Dict[str, Any]]:
-    """既存分析の冪等性チェック"""
-    # 1時間以内の同じ分析を検索
-    cutoff_time = datetime.utcnow() - timedelta(hours=1)
-    
-    for job in analysis_jobs.values():
-        job_created = datetime.fromisoformat(job["created_at"])
-        if (job.get("idempotency_key") == idempotency_key and 
-            job_created > cutoff_time and 
-            job["status"] == "completed"):
-            return job
-    
-    return None
+# WebSocket Events (for real-time updates)
+@router.websocket("/ws/ai-updates/{symbol}")
+async def ai_analysis_websocket(websocket, symbol: str):
+    """AI分析リアルタイム更新WebSocket"""
+    # WebSocket実装は別途 websocket/manager.py で統合
+    pass
