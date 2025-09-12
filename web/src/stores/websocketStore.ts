@@ -29,7 +29,7 @@ interface WebSocketState {
 }
 
 const WS_URL = process.env.NODE_ENV === 'development' 
-  ? 'ws://localhost:8080/ws' 
+  ? 'ws://localhost:8000/ws' 
   : `wss://${window.location.host}/ws`
 
 const MAX_RECONNECT_ATTEMPTS = 10

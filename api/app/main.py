@@ -38,25 +38,45 @@ async def lifespan(app: FastAPI):
     print(f"   - CloudRun: {settings.is_cloud_run}")
     
     # データベース初期化
-    await init_database()
-    print("   - Database initialized")
+    try:
+        await init_database()
+        print("   - Database initialized")
+    except Exception as e:
+        logger.warning(f"Database initialization failed: {e}")
+        print("   - Database initialization skipped (development mode)")
     
     # Redis接続初期化
-    await redis_client.connect()
-    print("   - Redis Client connected")
+    try:
+        await redis_client.connect()
+        print("   - Redis Client connected")
+    except Exception as e:
+        logger.warning(f"Redis connection failed: {e}")
+        print("   - Redis connection skipped (development mode)")
     
     # WebSocketマネージャー起動
-    await websocket_manager.startup()
-    print("   - WebSocket Manager initialized")
+    try:
+        await websocket_manager.startup()
+        print("   - WebSocket Manager initialized")
+    except Exception as e:
+        logger.warning(f"WebSocket manager startup failed: {e}")
+        print("   - WebSocket manager startup skipped (development mode)")
     
     # リアルタイムデータサービス起動
-    await realtime_service.start()
-    print("   - Realtime Service started")
+    try:
+        await realtime_service.start()
+        print("   - Realtime Service started")
+    except Exception as e:
+        logger.warning(f"Realtime service startup failed: {e}")
+        print("   - Realtime service startup skipped (development mode)")
     
     # 監視サービス起動
-    from app.services.monitoring_service import monitoring_service
-    await monitoring_service.start_monitoring()
-    print("   - Monitoring Service started")
+    try:
+        from app.services.monitoring_service import monitoring_service
+        await monitoring_service.start_monitoring()
+        print("   - Monitoring Service started")
+    except Exception as e:
+        logger.warning(f"Monitoring service startup failed: {e}")
+        print("   - Monitoring service startup skipped (development mode)")
     
     yield
     
