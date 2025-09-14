@@ -17,6 +17,7 @@ import { useWebSocketNotifications } from "@/hooks/useNotification";
 import { ToastContainer } from "@/components/ui/Toast";
 import { useNotification } from "@/hooks/useNotification";
 import { WebSocketMessage } from "@/stores/websocketStore";
+import { useAuthStore } from "@/lib/auth-store";
 
 // Mock data helpers
 // 型定義
@@ -552,6 +553,12 @@ function RealtimeTable() {
 export default function App() {
   const { toasts, removeToast } = useNotification();
   const { handleWebSocketMessage } = useWebSocketNotifications();
+  const { isAuthenticated, checkAuth } = useAuthStore();
+
+  // 認証状態チェック
+  useEffect(() => {
+    checkAuth();
+  }, [checkAuth]);
 
   // WebSocket通知の処理
   useWebSocket({
@@ -563,6 +570,11 @@ export default function App() {
     console.log("Kaboom.ai Dashboard loaded");
   }, []);
 
+  // 認証されていない場合は何も表示しない（middlewareがリダイレクトするため）
+  if (!isAuthenticated) {
+    return null;
+  }
+
   return (
     <>
       <main className="kb-container space-y-6">
@@ -570,12 +582,12 @@ export default function App() {
         <PortfolioChart />
         <RealtimeTable />
       </main>
-      
+
       {/* 通知コンテナ */}
-      <ToastContainer 
-        toasts={toasts} 
+      <ToastContainer
+        toasts={toasts}
         onClose={removeToast}
-        position="top-right" 
+        position="top-right"
       />
     </>
   );

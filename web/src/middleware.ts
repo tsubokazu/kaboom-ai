@@ -2,34 +2,39 @@ import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 
 export function middleware(request: NextRequest) {
-  // 認証が必要なルート
-  const protectedRoutes = ["/"];
-
-  // 認証済みユーザーがアクセスできないルート
-  const authRoutes = ["/login", "/signup"];
-
   const { pathname } = request.nextUrl;
 
-  // 認証状態を確認（モック認証用のクッキーチェック）
+  // 認証不要のルート（パブリック）
+  const publicRoutes = ["/login", "/signup", "/forgot-password"];
+
+  // パスワードリセット関連のルート（auth callback用）
+  const authCallbackRoutes = ["/auth/reset-password", "/auth/confirm"];
+
+  // 認証状態を確認（Supabase認証用のクッキーチェック）
   const authCookie = request.cookies.get("kb-auth");
   const isAuthenticated = authCookie?.value === "true";
 
-  // 保護されたルートへの未認証アクセス
+  // パブリックルートまたは認証コールバック関連の場合はそのまま通す
   if (
-    protectedRoutes.some((route) => pathname.startsWith(route)) &&
-    pathname !== "/login" &&
-    pathname !== "/signup" &&
-    !isAuthenticated
+    publicRoutes.includes(pathname) ||
+    authCallbackRoutes.some((route) => pathname.startsWith(route))
   ) {
-    return NextResponse.redirect(new URL("/login", request.url));
+    // 認証済みユーザーがログイン・新規登録ページにアクセスした場合はダッシュボードへ
+    if (publicRoutes.includes(pathname) && isAuthenticated) {
+      return NextResponse.redirect(new URL("/", request.url));
+    }
+    return NextResponse.next();
   }
 
-  // 認証済みユーザーの認証ページアクセス
-  if (
-    authRoutes.some((route) => pathname.startsWith(route)) &&
-    isAuthenticated
-  ) {
-    return NextResponse.redirect(new URL("/", request.url));
+  // 上記以外の全てのルートは認証が必要
+  // 未認証の場合はログイン画面にリダイレクト
+  if (!isAuthenticated) {
+    // 現在のURLを保存してログイン後にリダイレクトできるようにする
+    const loginUrl = new URL("/login", request.url);
+    if (pathname !== "/") {
+      loginUrl.searchParams.set("redirect", pathname);
+    }
+    return NextResponse.redirect(loginUrl);
   }
 
   return NextResponse.next();

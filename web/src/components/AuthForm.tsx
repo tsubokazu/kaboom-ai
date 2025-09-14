@@ -10,9 +10,10 @@ interface AuthFormProps {
   mode: "login" | "signup";
   onSubmit: (email: string, password: string, username?: string) => void;
   loading?: boolean;
+  error?: string | null;
 }
 
-export function AuthForm({ mode, onSubmit, loading = false }: AuthFormProps) {
+export function AuthForm({ mode, onSubmit, loading = false, error }: AuthFormProps) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [username, setUsername] = useState("");
@@ -32,7 +33,7 @@ export function AuthForm({ mode, onSubmit, loading = false }: AuthFormProps) {
   return (
     <Card className="p-8 space-y-6">
       <div className="text-center space-y-2">
-        <h1 className="text-3xl font-bold text-gray-900 dark:text-white">
+        <h1 className="text-3xl font-bold" style={{ color: "var(--kb-text)" }}>
           Kaboom.ai
         </h1>
         <p className="text-gray-600 dark:text-gray-400">
@@ -40,10 +41,16 @@ export function AuthForm({ mode, onSubmit, loading = false }: AuthFormProps) {
         </p>
       </div>
 
+      {error && (
+        <div className="p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
+          <p className="text-sm text-red-600 dark:text-red-400">{error}</p>
+        </div>
+      )}
+
       <form onSubmit={handleSubmit} className="space-y-4">
         {isSignup && (
           <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+            <label className="block text-sm font-medium mb-2" style={{ color: "var(--kb-text)" }}>
               ユーザー名
             </label>
             <Input
@@ -57,7 +64,7 @@ export function AuthForm({ mode, onSubmit, loading = false }: AuthFormProps) {
         )}
 
         <div>
-          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+          <label className="block text-sm font-medium mb-2" style={{ color: "var(--kb-text)" }}>
             メールアドレス
           </label>
           <Input
@@ -70,7 +77,7 @@ export function AuthForm({ mode, onSubmit, loading = false }: AuthFormProps) {
         </div>
 
         <div>
-          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+          <label className="block text-sm font-medium mb-2" style={{ color: "var(--kb-text)" }}>
             パスワード
           </label>
           <Input
@@ -84,7 +91,7 @@ export function AuthForm({ mode, onSubmit, loading = false }: AuthFormProps) {
 
         {isSignup && (
           <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+            <label className="block text-sm font-medium mb-2" style={{ color: "var(--kb-text)" }}>
               パスワード確認
             </label>
             <Input
