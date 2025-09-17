@@ -19,6 +19,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(me
 
 MEASUREMENT = "ohlcv_1m"
 MAX_INTRADAY_DAYS = 7  # yfinance制限: 1m粒度は約7日ずつ取得する必要がある
+MAX_INTRADAY_LOOKBACK_DAYS = 29  # 1mデータは過去30日未満のみ取得可能
 
 
 def parse_args() -> argparse.Namespace:
@@ -50,6 +51,16 @@ def fetch_symbol(symbol: str, interval: str, days: int) -> pd.DataFrame:
 
     tz_local = ZoneInfo("Asia/Tokyo")
     now_local = datetime.now(tz_local)
+
+    if interval == "1m" and days > MAX_INTRADAY_LOOKBACK_DAYS:
+        logger.warning(
+            "%s: 1m interval supports only ~%d days; trimming request from %d days",
+            symbol,
+            MAX_INTRADAY_LOOKBACK_DAYS,
+            days,
+        )
+        days = MAX_INTRADAY_LOOKBACK_DAYS
+
     start_local = now_local - timedelta(days=days)
 
     frames: List[pd.DataFrame] = []
@@ -61,6 +72,7 @@ def fetch_symbol(symbol: str, interval: str, days: int) -> pd.DataFrame:
             interval=interval,
             start=chunk_start,
             end=chunk_end,
+            group_by="column",
             auto_adjust=False,
             progress=False,
         )
@@ -88,6 +100,15 @@ def fetch_symbol(symbol: str, interval: str, days: int) -> pd.DataFrame:
     return df
 
 
+def _to_float(value) -> float:
+    """pandasシリーズやnumpy型を安全にfloat化する。"""
+    if isinstance(value, pd.Series):
+        value = value.iloc[0]
+    if hasattr(value, "item"):
+        value = value.item()
+    return float(value)
+
+
 def dataframe_to_points(df: pd.DataFrame) -> List[Point]:
     points: List[Point] = []
     for ts, row in df.iterrows():
@@ -97,11 +118,11 @@ def dataframe_to_points(df: pd.DataFrame) -> List[Point]:
             .tag("exchange", "TSE")
             .tag("currency", "JPY")
             .tag("source", "yf")
-            .field("open", float(row["open"]))
-            .field("high", float(row["high"]))
-            .field("low", float(row["low"]))
-            .field("close", float(row["close"]))
-            .field("volume", float(row.get("volume", 0.0)))
+            .field("open", _to_float(row["open"]))
+            .field("high", _to_float(row["high"]))
+            .field("low", _to_float(row["low"]))
+            .field("close", _to_float(row["close"]))
+            .field("volume", _to_float(row.get("volume", 0.0)))
             .time(datetime.fromtimestamp(ts.timestamp(), tz=timezone.utc))
         )
         points.append(point)
