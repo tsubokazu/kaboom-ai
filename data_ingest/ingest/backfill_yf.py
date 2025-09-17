@@ -3,8 +3,9 @@ from __future__ import annotations
 
 import argparse
 import logging
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from typing import Iterable, List
+from typing import Dict, Iterable, List
 
 from zoneinfo import ZoneInfo
 
@@ -17,9 +18,24 @@ from data_ingest.config.loader import InfluxConfig, load_influx_config
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 
-MEASUREMENT = "ohlcv_1m"
-MAX_INTRADAY_DAYS = 7  # yfinance制限: 1m粒度は約7日ずつ取得する必要がある
-MAX_INTRADAY_LOOKBACK_DAYS = 29  # 1mデータは過去30日未満のみ取得可能
+
+@dataclass(frozen=True)
+class IntervalSpec:
+    measurement: str
+    chunk_days: int
+    max_days: int
+    default_bucket_attr: str
+
+
+INTERVAL_SPECS: Dict[str, IntervalSpec] = {
+    "1m": IntervalSpec("ohlcv_1m", chunk_days=7, max_days=29, default_bucket_attr="bucket_raw_1m_hot"),
+    "2m": IntervalSpec("ohlcv_2m", chunk_days=30, max_days=60, default_bucket_attr="bucket_agg_5m"),
+    "5m": IntervalSpec("ohlcv_5m", chunk_days=30, max_days=60, default_bucket_attr="bucket_agg_5m"),
+    "15m": IntervalSpec("ohlcv_15m", chunk_days=30, max_days=60, default_bucket_attr="bucket_agg_5m"),
+    "30m": IntervalSpec("ohlcv_30m", chunk_days=30, max_days=60, default_bucket_attr="bucket_agg_5m"),
+    "60m": IntervalSpec("ohlcv_60m", chunk_days=365, max_days=730, default_bucket_attr="bucket_agg_5m"),
+    "1d": IntervalSpec("ohlcv_1d", chunk_days=365, max_days=1825, default_bucket_attr="bucket_agg_1d"),
+}
 
 
 def parse_args() -> argparse.Namespace:
@@ -28,14 +44,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--days", type=int, default=30, help="取得日数 (最大60)")
     parser.add_argument(
         "--interval",
-        choices=["1m", "2m", "5m", "15m", "30m", "60m"],
+        choices=sorted(INTERVAL_SPECS.keys()),
         default="1m",
         help="yfinanceの取得間隔",
     )
     parser.add_argument(
         "--bucket",
         default=None,
-        help="書き込み先バケット (未指定なら設定ファイルの raw_1m_hot)",
+        help="書き込み先バケット (未指定なら interval に応じた設定値を使用)",
     )
     parser.add_argument(
         "--chunk-size",
@@ -46,27 +62,28 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def fetch_symbol(symbol: str, interval: str, days: int) -> pd.DataFrame:
+def fetch_symbol(symbol: str, interval: str, days: int, spec: IntervalSpec) -> pd.DataFrame:
     logger.info("fetching %s interval=%s days=%d", symbol, interval, days)
 
     tz_local = ZoneInfo("Asia/Tokyo")
     now_local = datetime.now(tz_local)
 
-    if interval == "1m" and days > MAX_INTRADAY_LOOKBACK_DAYS:
+    if days > spec.max_days:
         logger.warning(
-            "%s: 1m interval supports only ~%d days; trimming request from %d days",
+            "%s: %s interval supports up to ~%d days; trimming from %d days",
             symbol,
-            MAX_INTRADAY_LOOKBACK_DAYS,
+            interval,
+            spec.max_days,
             days,
         )
-        days = MAX_INTRADAY_LOOKBACK_DAYS
+        days = spec.max_days
 
     start_local = now_local - timedelta(days=days)
 
     frames: List[pd.DataFrame] = []
     chunk_start = start_local
     while chunk_start < now_local:
-        chunk_end = min(chunk_start + timedelta(days=MAX_INTRADAY_DAYS), now_local)
+        chunk_end = min(chunk_start + timedelta(days=spec.chunk_days), now_local)
         df_chunk = yf.download(
             tickers=symbol,
             interval=interval,
@@ -88,6 +105,7 @@ def fetch_symbol(symbol: str, interval: str, days: int) -> pd.DataFrame:
 
     df = pd.concat(frames)
     df = df[~df.index.duplicated(keep="last")]
+    df = df.sort_index()
 
     # yfinanceはindexを終値時刻(通常はUTC)で返す。必要に応じてタイムゾーンを付与してUTCへ変換。
     if df.index.tzinfo is None:
@@ -109,11 +127,11 @@ def _to_float(value) -> float:
     return float(value)
 
 
-def dataframe_to_points(df: pd.DataFrame, symbol: str) -> List[Point]:
+def dataframe_to_points(df: pd.DataFrame, symbol: str, measurement: str) -> List[Point]:
     points: List[Point] = []
     for ts, row in df.iterrows():
         point = (
-            Point(MEASUREMENT)
+            Point(measurement)
             .tag("symbol", symbol)
             .tag("exchange", "TSE")
             .tag("currency", "JPY")
@@ -151,7 +169,13 @@ def write_to_influx(client: InfluxDBClient3, bucket: str, points: Iterable[Point
 def main() -> None:
     args = parse_args()
     config: InfluxConfig = load_influx_config()
-    bucket = args.bucket or config.bucket_raw_1m_hot
+    spec = INTERVAL_SPECS[args.interval]
+
+    default_bucket = getattr(config, spec.default_bucket_attr, None)
+    if default_bucket is None:
+        raise RuntimeError(f"InfluxConfig is missing attribute {spec.default_bucket_attr}")
+
+    bucket = args.bucket or default_bucket
 
     with InfluxDBClient3(
         host=config.host,
@@ -162,10 +186,10 @@ def main() -> None:
     ) as client:
         total_points = 0
         for symbol in args.symbols:
-            df = fetch_symbol(symbol, args.interval, args.days)
+            df = fetch_symbol(symbol, args.interval, args.days, spec)
             if df.empty:
                 continue
-            points = dataframe_to_points(df, symbol)
+            points = dataframe_to_points(df, symbol, spec.measurement)
             written = write_to_influx(client, bucket, points, args.chunk_size)
             logger.info("%s: wrote %d points to %s", symbol, written, bucket)
             total_points += written

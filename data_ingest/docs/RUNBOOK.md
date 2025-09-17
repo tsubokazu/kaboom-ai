@@ -54,11 +54,20 @@ uv sync        # pyproject.toml / uv.lock に基づき環境を構築
 cd /Users/kazusa/Develop/kaboom
 uv run --project api python -m data_ingest.ingest.backfill_yf \
   --symbols 7203.T 9984.T --days 30 --interval 1m
+
+# 5分足を60日分取得し、agg_5mバケット (measurement: ohlcv_5m) に保存
+uv run --project api python -m data_ingest.ingest.backfill_yf \
+  --symbols 7203.T 9984.T --days 60 --interval 5m
+
+# 日足を2年分取得し、agg_1dバケット (measurement: ohlcv_1d) に保存
+uv run --project api python -m data_ingest.ingest.backfill_yf \
+  --symbols 7203.T 9984.T --days 730 --interval 1d
 ```
 
 - `uv run --project api` で `api/pyproject.toml` に定義した環境を利用しつつ、リポジトリ直下の `data_ingest` モジュールを実行できる。
 - 書き込み先バケットを変更したい場合は `--bucket agg_5m` のようにオプションを指定。
-- yfinance の仕様上、1 分足はリクエストあたり 7〜8 日までしか取得できないため、スクリプト内部で期間を自動分割して取得する。また 1 分足の履歴は過去 30 日未満しか取得できないため、`--days` を指定しても上限は自動的に約 29 日にトリミングされる。
+- interval に応じてデフォルトの書き込み先バケットと measurement（1m→`raw_1m_hot`/`ohlcv_1m`、5m 系→`agg_5m`/`ohlcv_5m` など）が切り替わる。
+- yfinance の仕様上、1 分足はリクエストあたり 7〜8 日までしか取得できないため、スクリプト内部で期間を自動分割して取得する。また 1 分足の履歴は過去 30 日未満しか取得できないため、`--days` を指定しても上限は自動的に約 29 日にトリミングされる。5 分足は約 60 日、日足は最大 5 年程度までを想定している。
 
 ## 8. 結果確認
 1. 実行ログで書き込み件数を確認。
