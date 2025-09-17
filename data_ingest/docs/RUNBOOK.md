@@ -40,23 +40,37 @@ InfluxDB Cloud のダッシュボードで以下のバケットを作成する�
    ```
 3. 必要に応じてバケット名・バッチサイズを変更。
 
-## 6. 取得スクリプトの実行フロー
-1. `python -m venv .venv && source .venv/bin/activate`
-2. `pip install -r requirements.txt`（`influxdb3-python`, `yfinance`, `pandas` などが含まれる予定）
-3. バックフィル実行（例: 直近 30 日の 1 分足）
-   ```bash
-   python -m data_ingest.ingest.backfill_yf --symbols 7203.T 9984.T --days 30
-   ```
-4. スクリプトは `INFLUXDB_*` 環境変数を読み込み、`raw_1m_hot` に書き込む。
-5. 実行ログで書き込み件数を確認し、InfluxDB ダッシュボードの **Data Explorer** で検証。
+## 6. 依存関係の同期 (`uv` 利用)
+Kaboom プロジェクトでは Python 依存関係管理に `uv` を採用する。
 
-## 7. トラブルシューティング
+```bash
+# ルートから実行
+cd /Users/kazusa/Develop/kaboom/api
+uv sync        # pyproject.toml / uv.lock に基づき環境を構築
+```
+
+## 7. バックフィルの実行
+```bash
+cd /Users/kazusa/Develop/kaboom
+uv run --project api python -m data_ingest.ingest.backfill_yf \
+  --symbols 7203.T 9984.T --days 30 --interval 1m
+```
+
+- `uv run --project api` で `api/pyproject.toml` に定義した環境を利用しつつ、リポジトリ直下の `data_ingest` モジュールを実行できる。
+- 書き込み先バケットを変更したい場合は `--bucket agg_5m` のようにオプションを指定。
+
+## 8. 結果確認
+1. 実行ログで書き込み件数を確認。
+2. InfluxDB の **Data Explorer** で `raw_1m_hot` バケットを開き、対象銘柄のデータが存在するか確認。
+3. 必要に応じて `SELECT` クエリまたは InfluxDB Studio のグラフで検証。
+
+## 9. トラブルシューティング
 - **401 Unauthorized**: トークンの権限不足。All-Access または対象バケット Write 権限を再付与。
-- **Rate limit**: yfinance の制限に達した場合は `--sleep` オプションでリクエスト間隔を延長。
-- **タイムゾーン不一致**: 取得データは JST、InfluxDB は UTC タイムスタンプで保存する。スクリプト内で `tz_convert('UTC')` を実施。
-- **パッケージ未インストール**: `pip install influxdb3-python yfinance pandas python-dotenv` を追加。
+- **Rate limit**: yfinance の制限に達した場合は `--sleep` オプションを追加しリクエスト間隔を延長。
+- **タイムゾーン不一致**: 取得データは JST、InfluxDB は UTC タイムスタンプで保存。スクリプト内で `tz_convert('UTC')` 済み。
+- **依存が同期されない**: `uv sync --project api --refresh` で再解決。
 
-## 8. 今後の拡張
+## 10. 今後の拡張
 - JPX 有償データ取り込み時は `data_ingest/ingest/backfill_jpx.py` を実装し、`raw_1m_backfill` に書き込む。
 - 集計ジョブ（1 分→5 分/日足）を `data_ingest/pipeline/downsample_sql.py` に実装し、Cron で運用。
-- 監視用メトリクス・アラートは `monitor/checks.py` に追加して運用ダッシュボードと連携する。
+- 監視用メトリクス・アラートは `monitor/checks.py` に追加し、運用ダッシュボードと連携する。
