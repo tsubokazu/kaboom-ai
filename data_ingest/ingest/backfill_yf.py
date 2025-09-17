@@ -109,12 +109,12 @@ def _to_float(value) -> float:
     return float(value)
 
 
-def dataframe_to_points(df: pd.DataFrame) -> List[Point]:
+def dataframe_to_points(df: pd.DataFrame, symbol: str) -> List[Point]:
     points: List[Point] = []
     for ts, row in df.iterrows():
         point = (
             Point(MEASUREMENT)
-            .tag("symbol", row["symbol"])
+            .tag("symbol", symbol)
             .tag("exchange", "TSE")
             .tag("currency", "JPY")
             .tag("source", "yf")
@@ -165,7 +165,7 @@ def main() -> None:
             df = fetch_symbol(symbol, args.interval, args.days)
             if df.empty:
                 continue
-            points = dataframe_to_points(df)
+            points = dataframe_to_points(df, symbol)
             written = write_to_influx(client, bucket, points, args.chunk_size)
             logger.info("%s: wrote %d points to %s", symbol, written, bucket)
             total_points += written
