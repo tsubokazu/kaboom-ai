@@ -3,8 +3,10 @@ from __future__ import annotations
 
 import argparse
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Iterable, List
+
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 import yfinance as yf
@@ -16,6 +18,7 @@ logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 
 MEASUREMENT = "ohlcv_1m"
+MAX_INTRADAY_DAYS = 7  # yfinance制限: 1m粒度は約7日ずつ取得する必要がある
 
 
 def parse_args() -> argparse.Namespace:
@@ -44,14 +47,42 @@ def parse_args() -> argparse.Namespace:
 
 def fetch_symbol(symbol: str, interval: str, days: int) -> pd.DataFrame:
     logger.info("fetching %s interval=%s days=%d", symbol, interval, days)
-    df = yf.download(tickers=symbol, interval=interval, period=f"{days}d", auto_adjust=False)
-    if df.empty:
+
+    tz_local = ZoneInfo("Asia/Tokyo")
+    now_local = datetime.now(tz_local)
+    start_local = now_local - timedelta(days=days)
+
+    frames: List[pd.DataFrame] = []
+    chunk_start = start_local
+    while chunk_start < now_local:
+        chunk_end = min(chunk_start + timedelta(days=MAX_INTRADAY_DAYS), now_local)
+        df_chunk = yf.download(
+            tickers=symbol,
+            interval=interval,
+            start=chunk_start,
+            end=chunk_end,
+            auto_adjust=False,
+            progress=False,
+        )
+        if df_chunk.empty:
+            logger.debug("%s: chunk %s - %s returned empty", symbol, chunk_start, chunk_end)
+        else:
+            frames.append(df_chunk)
+        chunk_start = chunk_end
+
+    if not frames:
         logger.warning("%s: no data returned", symbol)
-        return df
-    # yfinanceは終値時刻をindexに返す。タイムゾーンをUTCへ変換。
+        return pd.DataFrame()
+
+    df = pd.concat(frames)
+    df = df[~df.index.duplicated(keep="last")]
+
+    # yfinanceはindexを終値時刻(通常はUTC)で返す。必要に応じてタイムゾーンを付与してUTCへ変換。
     if df.index.tzinfo is None:
-        df.index = df.index.tz_localize("Asia/Tokyo")
-    df.index = df.index.tz_convert(timezone.utc)
+        df.index = df.index.tz_localize("UTC")
+    else:
+        df.index = df.index.tz_convert(timezone.utc)
+
     df = df.rename(columns=str.lower)
     df["symbol"] = symbol
     return df
