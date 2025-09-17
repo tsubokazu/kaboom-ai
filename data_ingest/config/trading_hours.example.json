@@ -1,0 +1,18 @@
+{
+  "timezone": "Asia/Tokyo",
+  "sessions": [
+    {
+      "name": "morning",
+      "open": "09:00",
+      "close": "11:30"
+    },
+    {
+      "name": "afternoon",
+      "open": "12:30",
+      "close": "15:00"
+    }
+  ],
+  "holidays_csv": "data_ingest/data/jpx_holidays.csv",
+  "early_closures": [],
+  "notes": "JPXの祝日一覧を毎年更新し、必要に応じて半日取引や臨時休場を追加してください。"
+}

@@ -94,3 +94,6 @@ $RECYCLE.BIN/
 .directory
 .Trash-*
 .nfs*
+.playwright-mcp/login-page-fixed.png
+.playwright-mcp/login-page-lightmode.png
+.playwright-mcp/signup-page-fixed-labels.png

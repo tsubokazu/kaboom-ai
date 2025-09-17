@@ -1,0 +1,28 @@
+# InfluxDB connection template
+
+[connection]
+# InfluxDB Cloud Serverless base URL (例: https://us-east-1-1.aws.cloud2.influxdata.com)
+host = "https://<region>.aws.cloud2.influxdata.com"
+# 組織名
+org = "your-org"
+# APIトークン（本番では環境変数やシークレットマネージャから供給。このファイルには書かない）
+token_env_var = "INFLUXDB_TOKEN"
+
+[buckets]
+raw_1m_hot = "raw_1m_hot"
+raw_1m_backfill = "raw_1m_backfill"
+agg_5m = "agg_5m"
+agg_1d = "agg_1d"
+
+[options]
+# 書き込みバッチサイズやリトライ設定のデフォルト値
+write_batch_size = 5_000
+write_flush_interval_ms = 1_000
+max_retries = 3
+retry_backoff_seconds = 5
+
+[paths]
+# ローカルで使用する環境変数ファイル例
+env_file = "data_ingest/.env.local"
+# Runbook への参照パス
+runbook_path = "data_ingest/docs/RUNBOOK.md"
