@@ -4,12 +4,18 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import sys
 from pathlib import Path
 from typing import Dict, Iterable, List
 
 import pandas as pd
 
-from data_ingest.config.loader import load_influx_config, load_universe_settings
+# ルートディレクトリを import path に追加
+ROOT_DIR = Path(__file__).resolve().parents[2]
+if str(ROOT_DIR) not in sys.path:
+    sys.path.append(str(ROOT_DIR))
+
+from data_ingest.config.loader import load_env, load_influx_config, load_universe_settings
 from data_ingest.pipeline.metrics import (
     InfluxMarketDataClient,
     MetricConfig,
@@ -24,12 +30,13 @@ from data_ingest.pipeline.score_universe import (
     load_universe_settings_struct,
     select_universe,
 )
+from data_ingest.pipeline.supabase_sector_loader import load_symbols_from_supabase
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 
 
-def load_symbols(path: Path) -> List[str]:
+def load_symbols_from_csv(path: Path) -> List[str]:
     df = pd.read_csv(path)
     column = df.columns[0]
     return [str(value).strip() for value in df[column].dropna().unique()]
@@ -82,6 +89,12 @@ def save_snapshot(path: Path, data: List[Dict[str, object]]) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(description="Select Core20 and Bench5 universe")
     parser.add_argument(
+        "--symbol-source",
+        choices=["supabase", "csv"],
+        default="supabase",
+        help="銘柄リストの取得元。supabase または csv",
+    )
+    parser.add_argument(
         "--settings",
         type=Path,
         default=Path("data_ingest/config/universe_settings.example.toml"),
@@ -91,7 +104,7 @@ def main() -> None:
         "--symbols",
         type=Path,
         default=Path("data_ingest/data/symbols_prime.csv"),
-        help="対象銘柄リスト (CSV)",
+        help="対象銘柄リスト (CSV)。--symbol-source=csv の場合に使用",
     )
     parser.add_argument(
         "--snapshot",
@@ -99,7 +112,23 @@ def main() -> None:
         default=Path("data_ingest/data/universe_snapshot.csv"),
         help="メトリクスとスコアを出力するCSV",
     )
+    parser.add_argument(
+        "--market",
+        type=str,
+        default="TSE_PRIME",
+        help="Supabaseから取得するmarket値 (--symbol-source=supabase時)",
+    )
+    parser.add_argument(
+        "--env-file",
+        type=Path,
+        help="追加で読み込む環境変数ファイル (.env)",
+    )
     args = parser.parse_args()
+
+    # 環境変数の読み込み（デフォルト .env.local → 任意指定）
+    load_env()
+    if args.env_file:
+        load_env(args.env_file)
 
     settings_raw = load_universe_settings(args.settings)
     metric_config = load_metric_config(settings_raw)
@@ -107,7 +136,15 @@ def main() -> None:
     thresholds = settings_raw.get("thresholds", {})
     output_cfg = settings_raw.get("output", {})
 
-    symbols = load_symbols(args.symbols)
+    symbols: List[str] = []
+    if args.symbol_source == "supabase":
+        symbols = load_symbols_from_supabase(args.market)
+        if not symbols:
+            logger.warning("Supabaseから銘柄を取得できませんでした。CSVへフォールバックします")
+            symbols = load_symbols_from_csv(args.symbols)
+    else:
+        symbols = load_symbols_from_csv(args.symbols)
+
     logger.info("loaded %d symbols", len(symbols))
 
     influx_config = load_influx_config()
