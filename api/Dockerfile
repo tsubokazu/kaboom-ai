@@ -53,29 +53,4 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
 
 EXPOSE ${PORT}
 
-CMD [
-  "gunicorn",
-  "app.main:app",
-  "--bind",
-  "0.0.0.0:8080",
-  "--workers",
-  "1",
-  "--worker-class",
-  "uvicorn.workers.UvicornWorker",
-  "--worker-connections",
-  "1000",
-  "--max-requests",
-  "1000",
-  "--max-requests-jitter",
-  "100",
-  "--timeout",
-  "60",
-  "--keepalive",
-  "5",
-  "--access-logfile",
-  "-",
-  "--error-logfile",
-  "-",
-  "--log-level",
-  "info"
-]
+CMD ["gunicorn","app.main:app","--bind","0.0.0.0:8080","--workers","1","--worker-class","uvicorn.workers.UvicornWorker","--worker-connections","1000","--max-requests","1000","--max-requests-jitter","100","--timeout","60","--keepalive","5","--access-logfile","-","--error-logfile","-","--log-level","info"]
