@@ -15,6 +15,7 @@ from app.routers.trading_integration import router as trading_router
 from app.routers.frontend_integration import router as frontend_router
 from app.routers.portfolios_db import router as portfolios_router
 from app.routers.trades_db import router as trades_router
+from app.routers.ingest import router as ingest_router
 from app.websocket.routes import router as websocket_router
 from app.websocket.manager import websocket_manager
 from app.services.routes import router as services_router
@@ -37,37 +38,49 @@ async def lifespan(app: FastAPI):
     print(f"   - Debug: {settings.DEBUG}")
     print(f"   - CloudRun: {settings.is_cloud_run}")
     
-    # データベース初期化
-    try:
-        await init_database()
-        print("   - Database initialized")
-    except Exception as e:
-        logger.warning(f"Database initialization failed: {e}")
-        print("   - Database initialization skipped (development mode)")
-    
-    # Redis接続初期化
-    try:
-        await redis_client.connect()
-        print("   - Redis Client connected")
-    except Exception as e:
-        logger.warning(f"Redis connection failed: {e}")
-        print("   - Redis connection skipped (development mode)")
-    
-    # WebSocketマネージャー起動
-    try:
-        await websocket_manager.startup()
-        print("   - WebSocket Manager initialized")
-    except Exception as e:
-        logger.warning(f"WebSocket manager startup failed: {e}")
-        print("   - WebSocket manager startup skipped (development mode)")
-    
-    # リアルタイムデータサービス起動
-    try:
-        await realtime_service.start()
-        print("   - Realtime Service started")
-    except Exception as e:
-        logger.warning(f"Realtime service startup failed: {e}")
-        print("   - Realtime service startup skipped (development mode)")
+    # データベース初期化（条件付き）
+    if not settings.DISABLE_DATABASE:
+        try:
+            await init_database()
+            print("   - Database initialized")
+        except Exception as e:
+            logger.warning(f"Database initialization failed: {e}")
+            print("   - Database initialization skipped")
+    else:
+        print("   - Database initialization disabled")
+
+    # Redis接続初期化（条件付き）
+    if not settings.DISABLE_REDIS:
+        try:
+            await redis_client.connect()
+            print("   - Redis Client connected")
+        except Exception as e:
+            logger.warning(f"Redis connection failed: {e}")
+            print("   - Redis connection skipped")
+    else:
+        print("   - Redis connection disabled")
+
+    # WebSocketマネージャー起動（条件付き）
+    if not settings.DISABLE_WEBSOCKET:
+        try:
+            await websocket_manager.startup()
+            print("   - WebSocket Manager initialized")
+        except Exception as e:
+            logger.warning(f"WebSocket manager startup failed: {e}")
+            print("   - WebSocket manager startup skipped")
+    else:
+        print("   - WebSocket manager disabled")
+
+    # リアルタイムデータサービス起動（条件付き）
+    if not settings.DISABLE_REALTIME:
+        try:
+            await realtime_service.start()
+            print("   - Realtime Service started")
+        except Exception as e:
+            logger.warning(f"Realtime service startup failed: {e}")
+            print("   - Realtime service startup skipped")
+    else:
+        print("   - Realtime service disabled")
     
     # 監視サービス起動
     try:
@@ -137,6 +150,7 @@ app.include_router(portfolios_router)  # ポートフォリオ管理
 app.include_router(trades_router)      # 取引管理
 app.include_router(websocket_router, tags=["WebSocket"])
 app.include_router(services_router)
+app.include_router(ingest_router)      # データインジェスト
 
 # Root endpoint only (health endpoints are in routers/health.py)
 

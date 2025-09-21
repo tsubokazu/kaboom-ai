@@ -1,0 +1,73 @@
+# Universe selection & quality thresholds (template)
+
+[universe]
+# 対象市場。MVPではTSE Primeのみを想定
+markets = ["TSE_PRIME"]
+core_size = 20
+bench_size = 5
+
+[thresholds]
+# 平均売買代金の下限（JPY）例: 10億円 = 1_000_000_000
+adv_jpy_min = 1_000_000_000
+# 必要に応じて目標値を設定し、スコアリング時に利用
+adv_jpy_target = 2_000_000_000
+# 許容終値レンジ（円）
+price_min = 500
+price_max = 50_000
+# ATR%（14）の許容レンジ（0.015 = 1.5%）
+atr_pct_min = 0.015
+atr_pct_max = 0.06
+# 直近60営業日の連続ゼロ出来高5分足の許容比率
+zero_volume_ratio_max = 0.02
+# ショートを許可する場合のみtrue。falseのとき売禁銘柄を自動除外
+allow_short = true
+
+[scoring.weights]
+liquidity = 0.35
+volatility_fit = 0.25
+cost_efficiency = 0.20
+close_liquidity = 0.15
+zero_volume_penalty = 0.05
+# 追加指標を使う場合は下記に追記（合計1.0を推奨）
+# efficiency_ratio = 0.10
+# orb_follow_through = 0.05
+# vwap_persistence = 0.05
+
+[scoring.parameters]
+# ATR%のターゲットと許容幅（score_vol計算で使用）
+target_atr_pct = 0.03
+atr_tolerance = 0.02
+# 実質コスト指標で使用する最小ランキング対象（例: 上位100銘柄）
+ranking_pool_size = 100
+# 引け前5分の出来高比率を計算する際の参照ウィンドウ（日数）
+close_volume_window_days = 20
+# 監視用オプション指標の有効化フラグ
+use_efficiency_ratio = false
+use_orb_follow_through = false
+use_vwap_persistence = false
+
+[scoring.hysteresis]
+# 既存採用銘柄の維持条件と新規採用条件
+maintain_rank_max = 30
+add_rank_max = 15
+
+[scoring.sector_cap]
+# セクター上限（0.30 = 30%）
+max_ratio = 0.30
+# セクター定義ファイルへのパス（相対パス例）
+definition_path = "batch/data/sector_map.csv"
+
+[monitoring]
+# 場中取得の許容遅延（秒）
+intraday_delay_threshold = 90
+# 連続ゼロ出来高率のアラート閾値
+zero_volume_alert = 0.02
+# API rate limitが連続発生した場合の通知回数
+rate_limit_alert_threshold = 3
+
+[output]
+# 日次で保存するユニバースの出力先
+core_list_path = "batch/data/core20.csv"
+bench_list_path = "batch/data/bench5.csv"
+# ロング専用・ショート不可リストの出力先
+long_only_path = "batch/data/long_only.csv"

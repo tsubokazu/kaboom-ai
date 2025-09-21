@@ -97,3 +97,13 @@ $RECYCLE.BIN/
 .playwright-mcp/login-page-fixed.png
 .playwright-mcp/login-page-lightmode.png
 .playwright-mcp/signup-page-fixed-labels.png
+.python-version
+n8n-service-account-key.json
+
+# Data ingest generated artifacts
+api/batch/data/core20.csv
+api/batch/data/bench5.csv
+api/batch/data/universe_snapshot.csv
+api/batch/data/sector_map.csv
+api/batch/data/sector_map_stats.json
+api/batch/data/sector_import_statements.sql

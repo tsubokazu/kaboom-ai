@@ -13,7 +13,7 @@ import pandas as pd
 import yfinance as yf
 from influxdb_client_3 import InfluxDBClient3, Point
 
-from data_ingest.config.loader import InfluxConfig, load_influx_config
+from batch.config.loader import InfluxConfig, load_influx_config
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")

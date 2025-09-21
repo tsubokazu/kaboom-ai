@@ -9,6 +9,12 @@ class Settings:
     API_HOST: str = os.getenv("API_HOST", "0.0.0.0")
     API_PORT: int = int(os.getenv("API_PORT", "8080"))
     DEBUG: bool = os.getenv("DEBUG", "False").lower() == "true"
+
+    # Cloud Run optimization flags
+    DISABLE_REDIS: bool = os.getenv("DISABLE_REDIS", "False").lower() == "true"
+    DISABLE_WEBSOCKET: bool = os.getenv("DISABLE_WEBSOCKET", "False").lower() == "true"
+    DISABLE_REALTIME: bool = os.getenv("DISABLE_REALTIME", "False").lower() == "true"
+    DISABLE_DATABASE: bool = os.getenv("DISABLE_DATABASE", "False").lower() == "true"
     
     # CORS Configuration
     ALLOWED_ORIGINS: list = [
@@ -68,6 +74,9 @@ class Settings:
     
     # Rate Limiting
     RATE_LIMIT_PER_MINUTE: int = int(os.getenv("RATE_LIMIT_PER_MINUTE", "100"))
+
+    # Ingest API token (for n8n scheduling etc.)
+    INGEST_API_TOKEN: Optional[str] = os.getenv("INGEST_API_TOKEN")
     
     # AI Configuration
     MAX_CONCURRENT_AI_REQUESTS: int = int(os.getenv("MAX_CONCURRENT_AI_REQUESTS", "3"))

@@ -28,10 +28,10 @@ InfluxDB Cloud のダッシュボードで以下のバケットを作成する�
 1. ダッシュボード左側メニューの **API Tokens** を開く。
 2. **Generate API Token** → **All-Access Token**（または対象バケット Write/Read）を選択。
 3. 表示されたトークンを安全なパスワードマネージャに保管。
-4. ローカル検証では `data_ingest/.env.local` に `INFLUXDB_TOKEN` として記載し、Git 管理下に置かない。
+4. ローカル検証では `batch/.env.local` に `INFLUXDB_TOKEN` として記載し、Git 管理下に置かない。
 
 ## 5. ローカル環境の設定
-1. `cp data_ingest/.env.example data_ingest/.env.local`
+1. `cp batch/.env.example batch/.env.local`
 2. 次の値を設定:
    ```env
    INFLUXDB_HOST="https://<region>.aws.cloud2.influxdata.com"
@@ -52,19 +52,19 @@ uv sync        # pyproject.toml / uv.lock に基づき環境を構築
 ## 7. バックフィルの実行
 ```bash
 cd /Users/kazusa/Develop/kaboom
-uv run --project api python -m data_ingest.ingest.backfill_yf \
+uv run --project api python -m batch.ingest.backfill_yf \
   --symbols 7203.T 9984.T --days 30 --interval 1m
 
 # 5分足を60日分取得し、agg_5mバケット (measurement: ohlcv_5m) に保存
-uv run --project api python -m data_ingest.ingest.backfill_yf \
+uv run --project api python -m batch.ingest.backfill_yf \
   --symbols 7203.T 9984.T --days 60 --interval 5m
 
 # 日足を2年分取得し、agg_1dバケット (measurement: ohlcv_1d) に保存
-uv run --project api python -m data_ingest.ingest.backfill_yf \
+uv run --project api python -m batch.ingest.backfill_yf \
   --symbols 7203.T 9984.T --days 730 --interval 1d
 ```
 
-- `uv run --project api` で `api/pyproject.toml` に定義した環境を利用しつつ、リポジトリ直下の `data_ingest` モジュールを実行できる。
+- `uv run --project api` で `api/pyproject.toml` に定義した環境を利用しつつ、リポジトリ直下の `batch` モジュールを実行できる。
 - 書き込み先バケットを変更したい場合は `--bucket agg_5m` のようにオプションを指定。
 - interval に応じてデフォルトの書き込み先バケットと measurement（1m→`raw_1m_hot`/`ohlcv_1m`、5m 系→`agg_5m`/`ohlcv_5m` など）が切り替わる。
 - yfinance の仕様上、1 分足はリクエストあたり 7〜8 日までしか取得できないため、スクリプト内部で期間を自動分割して取得する。また 1 分足の履歴は過去 30 日未満しか取得できないため、`--days` を指定しても上限は自動的に約 29 日にトリミングされる。5 分足は約 60 日、日足は最大 5 年程度までを想定している。
@@ -81,6 +81,6 @@ uv run --project api python -m data_ingest.ingest.backfill_yf \
 - **依存が同期されない**: `uv sync --project api --refresh` で再解決。
 
 ## 10. 今後の拡張
-- JPX 有償データ取り込み時は `data_ingest/ingest/backfill_jpx.py` を実装し、`raw_1m_backfill` に書き込む。
-- 集計ジョブ（1 分→5 分/日足）を `data_ingest/pipeline/downsample_sql.py` に実装し、Cron で運用。
+- JPX 有償データ取り込み時は `batch/ingest/backfill_jpx.py` を実装し、`raw_1m_backfill` に書き込む。
+- 集計ジョブ（1 分→5 分/日足）を `batch/pipeline/downsample_sql.py` に実装し、Cron で運用。
 - 監視用メトリクス・アラートは `monitor/checks.py` に追加し、運用ダッシュボードと連携する。

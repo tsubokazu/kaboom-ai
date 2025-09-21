@@ -1,75 +1,25 @@
-# Python
-__pycache__/
-*.py[cod]
-*$py.class
-*.so
-.Python
-build/
-develop-eggs/
-dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
-share/python-wheels/
-*.egg-info/
-.installed.cfg
-*.egg
-
-# Virtual environments
-.env
-.venv
-env/
-venv/
-ENV/
-env.bak/
-venv.bak/
-
-# IDEs
-.vscode/
-.idea/
-*.swp
-*.swo
-*~
-
-# OS
-.DS_Store
-.DS_Store?
-._*
-.Spotlight-V100
-.Trashes
-ehthumbs.db
-Thumbs.db
-
 # Git
-.git/
+.git
 .gitignore
 
-# Logs
+# Python caches
+__pycache__/
+*.pyc
+*.pyo
+
+# Virtual environments
+venv/
+.venv/
+
+# Local configs / secrets
+.env
+.env.*
+batch/.env.local
+
+# Generated data files
+batch/data/
+
+# Misc
 *.log
-logs/
-
-# Testing
-.coverage
-.pytest_cache/
-.tox/
-.nox/
-htmlcov/
-
-# Documentation
-docs/
-*.md
-
-# Development files
-websocket_test.html
-requirements.txt
-
-# Temporary files
-tmp/
-temp/
-.tmp
+dist/
+build/

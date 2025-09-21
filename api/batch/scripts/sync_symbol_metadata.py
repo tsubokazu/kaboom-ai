@@ -18,18 +18,11 @@ import yfinance as yf
 from supabase import Client, create_client
 from dotenv import load_dotenv
 
-# 既存スクリプトの再利用（暗黙的namespaceパッケージを利用）
-try:
-    from data_ingest.scripts.generate_prime_symbols import (
-        fetch_jpx_data,
-        filter_prime_symbols,
-    )
-except ImportError:  # pragma: no cover - fallback when executed standalone without package context
-    sys.path.append(str(Path(__file__).resolve().parents[2]))
-    from data_ingest.scripts.generate_prime_symbols import (  # type: ignore
-        fetch_jpx_data,
-        filter_prime_symbols,
-    )
+# 既存スクリプトの再利用
+from batch.scripts.generate_prime_symbols import (
+    fetch_jpx_data,
+    filter_prime_symbols,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -123,8 +116,8 @@ def load_environment(explicit: Optional[Path]) -> None:
     default_paths = [
         repo_root / ".env",
         repo_root / "api/.env",
-        repo_root / "data_ingest/.env",
-        repo_root / "data_ingest/.env.local",
+        repo_root / "batch/.env",
+        repo_root / "batch/.env.local",
     ]
     candidates.extend(default_paths)
 

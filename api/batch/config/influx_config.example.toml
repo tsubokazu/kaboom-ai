@@ -23,6 +23,6 @@ retry_backoff_seconds = 5
 
 [paths]
 # ローカルで使用する環境変数ファイル例
-env_file = "data_ingest/.env.local"
+env_file = "batch/.env.local"
 # Runbook への参照パス
-runbook_path = "data_ingest/docs/RUNBOOK.md"
+runbook_path = "batch/docs/RUNBOOK.md"

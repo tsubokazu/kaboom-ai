@@ -1,0 +1,125 @@
+apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  name: kaboom-api
+  labels:
+    cloud.googleapis.com/location: asia-northeast1
+  annotations:
+    run.googleapis.com/ingress: all
+    run.googleapis.com/ingress-status: all
+spec:
+  template:
+    metadata:
+      annotations:
+        autoscaling.knative.dev/maxScale: "10"
+        autoscaling.knative.dev/minScale: "0"
+        run.googleapis.com/cpu-throttling: "true"
+        run.googleapis.com/execution-environment: gen2
+    spec:
+      containerConcurrency: 1000
+      timeoutSeconds: 300
+      serviceAccountName: 657734233816-compute@developer.gserviceaccount.com
+      containers:
+      - name: kaboom-api-1
+        image: gcr.io/kaboom-472705/kaboom-api
+        ports:
+        - name: http1
+          containerPort: 8080
+        env:
+        - name: DEBUG
+          value: "False"
+        - name: API_HOST
+          value: "0.0.0.0"
+        - name: API_PORT
+          value: "8080"
+        - name: DISABLE_REDIS
+          value: "true"
+        - name: DISABLE_WEBSOCKET
+          value: "true"
+        - name: DISABLE_REALTIME
+          value: "true"
+        - name: DATABASE_URL
+          valueFrom:
+            secretKeyRef:
+              key: latest
+              name: database-url
+        - name: SUPABASE_URL
+          valueFrom:
+            secretKeyRef:
+              key: latest
+              name: supabase-url
+        - name: SUPABASE_ANON_KEY
+          valueFrom:
+            secretKeyRef:
+              key: latest
+              name: supabase-anon-key
+        - name: OPENROUTER_API_KEY
+          valueFrom:
+            secretKeyRef:
+              key: latest
+              name: openrouter-api-key
+        - name: INGEST_API_TOKEN
+          valueFrom:
+            secretKeyRef:
+              key: latest
+              name: ingest-api-token
+        - name: JWT_SECRET_KEY
+          valueFrom:
+            secretKeyRef:
+              key: latest
+              name: jwt-secret-key
+        - name: INFLUXDB_HOST
+          valueFrom:
+            secretKeyRef:
+              key: latest
+              name: influxdb-host
+        - name: INFLUXDB_ORG
+          valueFrom:
+            secretKeyRef:
+              key: latest
+              name: influxdb-org
+        - name: INFLUXDB_TOKEN
+          valueFrom:
+            secretKeyRef:
+              key: latest
+              name: influxdb-token
+        - name: INFLUXDB_BUCKET_RAW_1M_HOT
+          valueFrom:
+            secretKeyRef:
+              key: latest
+              name: influxdb-bucket-raw-1m-hot
+        - name: INFLUXDB_BUCKET_AGG_5M
+          valueFrom:
+            secretKeyRef:
+              key: latest
+              name: influxdb-bucket-agg-5m
+        - name: INFLUXDB_BUCKET_AGG_1D
+          valueFrom:
+            secretKeyRef:
+              key: latest
+              name: influxdb-bucket-agg-1d
+        resources:
+          limits:
+            cpu: "1"
+            memory: "1Gi"
+        startupProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 0
+          timeoutSeconds: 1
+          periodSeconds: 3
+          successThreshold: 1
+          failureThreshold: 5
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 30
+          timeoutSeconds: 1
+          periodSeconds: 10
+          successThreshold: 1
+          failureThreshold: 3
+  traffic:
+  - percent: 100
+    latestRevision: true

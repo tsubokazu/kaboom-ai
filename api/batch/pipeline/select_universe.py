@@ -15,22 +15,22 @@ ROOT_DIR = Path(__file__).resolve().parents[2]
 if str(ROOT_DIR) not in sys.path:
     sys.path.append(str(ROOT_DIR))
 
-from data_ingest.config.loader import load_env, load_influx_config, load_universe_settings
-from data_ingest.pipeline.metrics import (
+from batch.config.loader import load_env, load_influx_config, load_universe_settings
+from batch.pipeline.metrics import (
     InfluxMarketDataClient,
     MetricConfig,
     SymbolMetrics,
     calculate_symbol_metrics,
     load_metric_config,
 )
-from data_ingest.pipeline.score_universe import (
+from batch.pipeline.score_universe import (
     UniverseSettings,
     calculate_scores,
     load_sector_map,
     load_universe_settings_struct,
     select_universe,
 )
-from data_ingest.pipeline.supabase_sector_loader import load_symbols_from_supabase
+from batch.pipeline.supabase_sector_loader import load_symbols_from_supabase
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
@@ -97,19 +97,19 @@ def main() -> None:
     parser.add_argument(
         "--settings",
         type=Path,
-        default=Path("data_ingest/config/universe_settings.example.toml"),
+        default=Path("batch/config/universe_settings.example.toml"),
         help="ユニバース選定設定ファイル",
     )
     parser.add_argument(
         "--symbols",
         type=Path,
-        default=Path("data_ingest/data/symbols_prime.csv"),
+        default=Path("batch/data/symbols_prime.csv"),
         help="対象銘柄リスト (CSV)。--symbol-source=csv の場合に使用",
     )
     parser.add_argument(
         "--snapshot",
         type=Path,
-        default=Path("data_ingest/data/universe_snapshot.csv"),
+        default=Path("batch/data/universe_snapshot.csv"),
         help="メトリクスとスコアを出力するCSV",
     )
     parser.add_argument(
@@ -165,13 +165,13 @@ def main() -> None:
     sector_map = load_sector_map(universe_settings.sector_cap.definition_path)
 
     existing_core = []
-    core_path = Path(output_cfg.get("core_list_path", "data_ingest/data/core20.csv"))
+    core_path = Path(output_cfg.get("core_list_path", "batch/data/core20.csv"))
     if core_path.exists():
         existing_core = load_existing_list(core_path)
 
     selection = select_universe(scores, universe_settings, existing_core, sector_map)
 
-    bench_path = Path(output_cfg.get("bench_list_path", "data_ingest/data/bench5.csv"))
+    bench_path = Path(output_cfg.get("bench_list_path", "batch/data/bench5.csv"))
     save_list(core_path, selection["core"])
     save_list(bench_path, selection["bench"])
 

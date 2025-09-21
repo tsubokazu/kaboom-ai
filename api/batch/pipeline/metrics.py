@@ -9,7 +9,7 @@ import numpy as np
 import pandas as pd
 from influxdb_client_3 import InfluxDBClient3
 
-from data_ingest.config.loader import InfluxConfig
+from batch.config.loader import InfluxConfig
 
 
 @dataclass

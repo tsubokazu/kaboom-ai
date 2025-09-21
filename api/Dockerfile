@@ -15,6 +15,7 @@ COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 
 # Python依存関係ファイルをコピー
 COPY pyproject.toml ./
+COPY uv.lock ./
 
 # 依存関係をインストール
 RUN uv sync --frozen --no-dev
@@ -41,6 +42,9 @@ COPY --from=builder /app/.venv /app/.venv
 
 # アプリケーションコードをコピー
 COPY --chown=kaboom:kaboom app/ /app/app/
+
+# バッチ処理モジュールをコピー
+COPY --chown=kaboom:kaboom batch/ /app/batch/
 
 # 非rootユーザーに切り替え
 USER kaboom
@@ -78,7 +82,7 @@ CMD gunicorn app.main:app \
     --max-requests ${MAX_REQUESTS} \
     --max-requests-jitter ${MAX_REQUESTS_JITTER} \
     --timeout ${TIMEOUT} \
-    --keepalive ${KEEPALIVE} \
+    --keep-alive ${KEEPALIVE} \
     --access-logfile - \
     --error-logfile - \
     --log-level info

@@ -52,10 +52,10 @@ maintain_rank_max = 30
 add_rank_max = 15
 
 [scoring.sector_cap]
-# セクター上限（0.30 = 30%）
-max_ratio = 0.30
+# セクター上限（0.70 = 70%）- Industrial多数のため緩和
+max_ratio = 0.70
 # セクター定義ファイルへのパス（相対パス例）
-definition_path = "data_ingest/data/sector_map.csv"
+definition_path = "batch/data/sector_map.csv"
 
 [monitoring]
 # 場中取得の許容遅延（秒）
@@ -67,8 +67,7 @@ rate_limit_alert_threshold = 3
 
 [output]
 # 日次で保存するユニバースの出力先
-core_list_path = "data_ingest/data/core20.csv"
-bench_list_path = "data_ingest/data/bench5.csv"
+core_list_path = "batch/data/core20.csv"
+bench_list_path = "batch/data/bench5.csv"
 # ロング専用・ショート不可リストの出力先
-long_only_path = "data_ingest/data/long_only.csv"
-
+long_only_path = "batch/data/long_only.csv"
