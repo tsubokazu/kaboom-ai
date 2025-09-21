@@ -1,88 +1,81 @@
 # CloudRun最適化 Dockerfile for Kaboom Stock Trading API
 FROM python:3.12-slim AS builder
 
-# 作業ディレクトリ設定
 WORKDIR /app
 
-# システムパッケージ更新・必要なパッケージインストール
-RUN apt-get update && apt-get install -y \
+RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     build-essential \
     && rm -rf /var/lib/apt/lists/*
 
-# uvをインストール（高速なPython package manager）
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 
-# Python依存関係ファイルをコピー
 COPY pyproject.toml ./
 COPY uv.lock ./
 
-# 依存関係をインストール
 RUN uv sync --frozen --no-dev
 
-# Production stage
 FROM python:3.12-slim AS production
 
-# 作業ディレクトリ設定
 WORKDIR /app
 
-# 非rootユーザー作成（セキュリティ向上）
-RUN useradd -m -u 1000 kaboom && \
-    mkdir -p /app && \
-    chown -R kaboom:kaboom /app
+RUN useradd -m -u 1000 kaboom && chown -R kaboom:kaboom /app
 
-# 必要なランタイムライブラリのみインストール
-RUN apt-get update && apt-get install -y \
+RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
-    && rm -rf /var/lib/apt/lists/* \
-    && apt-get clean
+    && rm -rf /var/lib/apt/lists/*
 
-# Builderステージから仮想環境をコピー
 COPY --from=builder /app/.venv /app/.venv
 
-# アプリケーションコードをコピー
 COPY --chown=kaboom:kaboom app/ /app/app/
-
-# バッチ処理モジュールをコピー
 COPY --chown=kaboom:kaboom batch/ /app/batch/
+COPY --chown=kaboom:kaboom alembic.ini /app/alembic.ini
+COPY --chown=kaboom:kaboom alembic/ /app/alembic/
+COPY --chown=kaboom:kaboom main.py /app/main.py
 
-# 非rootユーザーに切り替え
 USER kaboom
 
-# Pythonパス設定
 ENV PATH="/app/.venv/bin:$PATH"
-ENV PYTHONPATH="/app:$PYTHONPATH"
+ENV PYTHONPATH="/app"
 
-# CloudRun最適化設定
 ENV PORT=8080
-ENV HOST=0.0.0.0
 
-# Gunicorn設定（CloudRun推奨）
-ENV WORKERS=1
-ENV WORKER_CLASS=uvicorn.workers.UvicornWorker
-ENV WORKER_CONNECTIONS=1000
-ENV MAX_REQUESTS=1000
-ENV MAX_REQUESTS_JITTER=100
-ENV TIMEOUT=60
-ENV KEEPALIVE=5
+ENV WORKERS=1 \
+    WORKER_CLASS=uvicorn.workers.UvicornWorker \
+    WORKER_CONNECTIONS=1000 \
+    MAX_REQUESTS=1000 \
+    MAX_REQUESTS_JITTER=100 \
+    TIMEOUT=60 \
+    KEEPALIVE=5
 
-# ヘルスチェック
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD curl -f http://localhost:${PORT}/health || exit 1
 
-# ポート公開
 EXPOSE ${PORT}
 
-# 起動コマンド
-CMD gunicorn app.main:app \
-    --bind ${HOST}:${PORT} \
-    --workers ${WORKERS} \
-    --worker-class ${WORKER_CLASS} \
-    --worker-connections ${WORKER_CONNECTIONS} \
-    --max-requests ${MAX_REQUESTS} \
-    --max-requests-jitter ${MAX_REQUESTS_JITTER} \
-    --timeout ${TIMEOUT} \
-    --keep-alive ${KEEPALIVE} \
-    --access-logfile - \
-    --error-logfile - \
-    --log-level info
+CMD [
+  "gunicorn",
+  "app.main:app",
+  "--bind",
+  "0.0.0.0:8080",
+  "--workers",
+  "1",
+  "--worker-class",
+  "uvicorn.workers.UvicornWorker",
+  "--worker-connections",
+  "1000",
+  "--max-requests",
+  "1000",
+  "--max-requests-jitter",
+  "100",
+  "--timeout",
+  "60",
+  "--keepalive",
+  "5",
+  "--access-logfile",
+  "-",
+  "--error-logfile",
+  "-",
+  "--log-level",
+  "info"
+]
