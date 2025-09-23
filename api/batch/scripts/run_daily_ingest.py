@@ -77,6 +77,10 @@ def run_daily_ingest(
     if not symbol_list:
         raise RuntimeError("バックフィル対象の銘柄が取得できませんでした")
 
+    # デバッグ: InfluxDB接続情報をログ出力
+    logger.info(f"InfluxDB接続情報: host={config.host}, org={config.org}, token=...{config.token[-10:] if config.token else 'None'}")
+    logger.info(f"InfluxDBバケット設定: raw_1m_hot={config.bucket_raw_1m_hot}, agg_5m={config.bucket_agg_5m}, agg_1d={config.bucket_agg_1d}")
+
     result: IngestResult = {
         "total_symbols": len(symbol_list),
         "intervals": {},
@@ -98,6 +102,9 @@ def run_daily_ingest(
             bucket = getattr(config, spec.default_bucket_attr, None)
             if not bucket:
                 raise RuntimeError(f"InfluxConfigに {spec.default_bucket_attr} が設定されていません")
+
+            # デバッグ: 書き込み対象バケット情報をログ出力
+            logger.info(f"interval={interval}: バケット={bucket} に書き込み開始")
 
             interval_summary = {
                 "bucket": bucket,
