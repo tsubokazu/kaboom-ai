@@ -56,38 +56,74 @@ spec:
           value: "PROJECT_ID"
         - name: CLOUD_RUN_SERVICE
           value: "kaboom-api"
+        - name: DISABLE_REDIS
+          value: "true"
+        - name: DISABLE_WEBSOCKET
+          value: "true"
+        - name: DISABLE_CELERY
+          value: "true"
         
         # シークレット（Secret Manager統合）
         - name: SUPABASE_URL
           valueFrom:
             secretKeyRef:
-              name: kaboom-secrets
-              key: supabase_url
+              name: supabase-url
+              key: latest
         - name: SUPABASE_ANON_KEY
           valueFrom:
             secretKeyRef:
-              name: kaboom-secrets
-              key: supabase_anon_key
-        - name: SUPABASE_SERVICE_ROLE_KEY
+              name: supabase-anon-key
+              key: latest
+        - name: DATABASE_URL
           valueFrom:
             secretKeyRef:
-              name: kaboom-secrets
-              key: supabase_service_role_key
-        - name: REDIS_URL
+              name: database-url
+              key: latest
+        - name: INGEST_API_TOKEN
           valueFrom:
             secretKeyRef:
-              name: kaboom-secrets
-              key: redis_url
-        - name: OPENAI_API_KEY
+              name: ingest-api-token
+              key: latest
+        - name: INFLUXDB_TOKEN
           valueFrom:
             secretKeyRef:
-              name: kaboom-secrets
-              key: openai_api_key
-        - name: GEMINI_API_KEY
+              name: influxdb-token
+              key: latest
+        - name: INFLUXDB_HOST
           valueFrom:
             secretKeyRef:
-              name: kaboom-secrets
-              key: gemini_api_key
+              name: influxdb-host
+              key: latest
+        - name: INFLUXDB_ORG
+          valueFrom:
+            secretKeyRef:
+              name: influxdb-org
+              key: latest
+        - name: INFLUXDB_BUCKET_RAW_1M_HOT
+          valueFrom:
+            secretKeyRef:
+              name: influxdb-bucket-raw-1m-hot
+              key: latest
+        - name: INFLUXDB_BUCKET_AGG_5M
+          valueFrom:
+            secretKeyRef:
+              name: influxdb-bucket-agg-5m
+              key: latest
+        - name: INFLUXDB_BUCKET_AGG_1D
+          valueFrom:
+            secretKeyRef:
+              name: influxdb-bucket-agg-1d
+              key: latest
+        - name: OPENROUTER_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: openrouter-api-key
+              key: latest
+        - name: JWT_SECRET_KEY
+          valueFrom:
+            secretKeyRef:
+              name: jwt-secret-key
+              key: latest
         
         # ヘルスチェック
         livenessProbe:
