@@ -543,6 +543,119 @@ uv run python scripts/generate_types.py  # TypeScript型定義生成
 
 #### 環境変数設定状況
 - ✅ `OPENROUTER_API_KEY`: AI機能実動作確認済み
-- ✅ `SUPABASE_URL`, `SUPABASE_ANON_KEY`: 接続確認済み  
+- ✅ `SUPABASE_URL`, `SUPABASE_ANON_KEY`: 接続確認済み
 - ✅ `REDIS_URL`: Redis接続・機能動作確認済み
 - ✅ `CELERY_BROKER_URL`, `CELERY_RESULT_BACKEND`: Redis統合済み
+
+## 🚀 Cloud Run本番デプロイ状況 (2025-09-24)
+
+### ✅ Google Cloud Platform統合完了
+**Cloud Run自動デプロイ基盤:**
+- ✅ **GitHub Actions CI/CD**: 自動ビルド・デプロイパイプライン
+- ✅ **Secret Manager統合**: 全ての機密情報を安全に管理
+- ✅ **Container Registry**: Dockerイメージの自動ビルド・保存
+- ✅ **Cloud Run**: スケーラブルなコンテナ実行環境
+
+**データ取得・自動化システム:**
+- ✅ **n8n統合**: 日次市場データ自動取得ワークフロー
+- ✅ **InfluxDB統合**: 時系列データベースによる効率的データ管理
+- ✅ **yfinance統合**: リアルタイム株価・企業情報取得
+- ✅ **立花証券API**: 実取引機能準備完了
+
+### 🔧 本番環境設定詳細
+
+#### Secret Manager設定済みシークレット
+```bash
+# 認証・セキュリティ
+- database-url: PostgreSQL接続文字列 (Supabase)
+- supabase-url: Supabaseプロジェクト URL
+- supabase-anon-key: Supabase匿名キー
+- ingest-api-token: データ取得API認証トークン
+- jwt-secret-key: JWT署名用シークレット
+- openrouter-api-key: AI分析用API KEY
+
+# InfluxDB時系列データベース
+- influxdb-host: InfluxDB接続先
+- influxdb-org: InfluxDB組織ID
+- influxdb-token: InfluxDB認証トークン
+- influxdb-bucket-raw-1m-hot: 1分足生データバケット
+- influxdb-bucket-agg-5m: 5分足集約データバケット
+- influxdb-bucket-agg-1d: 日足集約データバケット
+```
+
+#### Cloud Run環境最適化
+```yaml
+# service.yaml 設定詳細
+env:
+  # パフォーマンス最適化
+  - DISABLE_REDIS: "true"     # 本番ではRedis無効化
+  - DISABLE_WEBSOCKET: "true" # 本番ではWebSocket無効化
+  - DISABLE_CELERY: "true"    # 本番ではCelery無効化
+
+  # リソース制限
+  resources:
+    limits:
+      cpu: "2000m"
+      memory: "4Gi"
+    requests:
+      cpu: "1000m"
+      memory: "2Gi"
+```
+
+### 📊 稼働中API (Cloud Run)
+```bash
+# 本番API確認コマンド
+curl https://kaboom-api-[PROJECT-ID].a.run.app/api/v1/health
+curl https://kaboom-api-[PROJECT-ID].a.run.app/docs
+
+# データ取得API (n8n経由で日次実行)
+POST /api/v1/ingest/run-daily
+GET  /api/v1/ingest/jobs/{job_id}
+GET  /api/v1/ingest/jobs (全ジョブリスト)
+GET  /api/v1/ingest/jobs/stats (統計情報)
+
+# 79エンドポイント完全稼働
+- ポートフォリオ管理: 9エンドポイント
+- 取引管理: 11エンドポイント
+- AI分析: 15エンドポイント
+- 管理機能: 7エンドポイント
+- 市場データ: 12エンドポイント
+- ヘルス/開発支援: 25エンドポイント
+```
+
+### 🔄 自動データ取得ワークフロー (n8n)
+```mermaid
+graph TD
+    A[n8n Scheduler] --> B[Secret Manager]
+    B --> C[Cloud Run API Call]
+    C --> D[yfinance Data Fetch]
+    D --> E[InfluxDB Storage]
+    E --> F[Supabase Metadata]
+    F --> G[Completion Notification]
+```
+
+#### n8n設定詳細
+- **実行頻度**: 毎日午前7時（JST）自動実行
+- **対象銘柄**: TSE_PRIME 1608銘柄
+- **データ種別**: 株価・出来高・テクニカル指標・企業情報
+- **エラーハンドリング**: 失敗時自動リトライ・通知機能
+
+### 🎯 次期開発ロードマップ
+
+#### Phase 3A: Next.js 15フロントエンド開発
+- **認証統合**: Supabase Auth + Cloud Run API統合
+- **リアルタイムダッシュボード**: WebSocket代替のServer-Sent Events
+- **AI分析UI**: OpenRouter統合による高度な分析画面
+- **モバイル対応**: PWA対応・レスポンシブデザイン
+
+#### Phase 3B: 本番運用強化
+- **監視・ログ**: Cloud Logging + Cloud Monitoring統合
+- **アラート**: 障害時自動通知・エスカレーション
+- **バックアップ**: データベース・InfluxDB自動バックアップ
+- **パフォーマンス**: Cloud CDN・キャッシュ戦略最適化
+
+### 🔐 セキュリティ強化完了
+- **認証**: JWT + Supabase統合・多要素認証準備
+- **認可**: RBAC (Role-Based Access Control) 実装
+- **レート制限**: 役割別API制限・DDoS保護
+- **データ保護**: 全通信HTTPS・機密情報Secret Manager管理
