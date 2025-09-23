@@ -4,6 +4,7 @@ PostgreSQL connection via Supabase with SQLAlchemy async support.
 """
 
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
+from sqlalchemy import text
 from sqlalchemy.orm import DeclarativeBase
 from typing import AsyncGenerator
 import logging
@@ -112,7 +113,7 @@ async def check_database_health() -> bool:
     """
     try:
         async with AsyncSessionLocal() as session:
-            await session.execute("SELECT 1")
+            await session.execute(text("SELECT 1"))
             return True
     except Exception as e:
         logger.error(f"Database health check failed: {e}")

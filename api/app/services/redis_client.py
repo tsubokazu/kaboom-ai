@@ -141,10 +141,10 @@ class RedisClient:
         try:
             cache_key = f"cache:{key}"
             serialized_data = json.dumps(data, default=str)
-            
+
             await self.client.setex(cache_key, expire_seconds, serialized_data)
             return True
-            
+
         except Exception as e:
             logger.error(f"Cache storage failed for {key}: {e}")
             return False
@@ -216,6 +216,43 @@ class RedisClient:
             
         except Exception as e:
             logger.error(f"Message publishing failed for {channel}: {e}")
+            return False
+
+    # 後方互換のためのラッパーメソッド
+    async def set(self, key: str, value: Any, expire: Optional[int] = None) -> bool:
+        """setex を伴うシンプルな値保存（既存コード互換用）"""
+        if not self.client:
+            raise RuntimeError("Redis client is not connected")
+        try:
+            if expire is not None and expire > 0:
+                await self.client.setex(key, expire, value)
+            else:
+                await self.client.set(key, value)
+            return True
+        except Exception as e:
+            logger.error(f"Redis set failed for {key}: {e}")
+            return False
+
+    async def get(self, key: str) -> Optional[Any]:
+        """値を取得（既存コード互換用）"""
+        if not self.client:
+            raise RuntimeError("Redis client is not connected")
+        try:
+            return await self.client.get(key)
+        except Exception as e:
+            logger.error(f"Redis get failed for {key}: {e}")
+            return None
+
+    async def publish(self, channel: str, message: Any) -> bool:
+        """publish_message のラッパー（既存コード互換用）"""
+        payload = message
+        if not isinstance(message, str):
+            payload = json.dumps(message, default=str)
+        try:
+            result = await self.client.publish(channel, payload)
+            return result > 0
+        except Exception as e:
+            logger.error(f"Redis publish failed for {channel}: {e}")
             return False
     
     async def subscribe_channel(self, channel: str, callback: Callable):
