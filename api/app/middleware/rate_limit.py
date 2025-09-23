@@ -130,10 +130,18 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
     
     async def _get_user_identity(self, request: Request) -> Tuple[str, str]:
         """ユーザー識別情報の取得"""
-        
+
+        # Ingest API専用トークンをチェック（admin権限付与）
+        ingest_token = request.headers.get("x-ingest-token")
+        if ingest_token and request.url.path.startswith("/api/v1/ingest/"):
+            # settings をインポートして比較
+            from app.config.settings import settings
+            if ingest_token == settings.INGEST_API_TOKEN and settings.INGEST_API_TOKEN:
+                return "ingest_service", "admin"
+
         # Authorization header from request
         auth_header = request.headers.get("authorization")
-        
+
         if auth_header and auth_header.startswith("Bearer "):
             try:
                 # JWT tokenからユーザーIDを抽出（簡易実装）
@@ -142,11 +150,11 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
                 # この例では簡略化してトークンをキーとして使用
                 user_key = f"user:{token[:16]}"  # トークンの一部をキーに
                 user_role = "basic"  # デフォルト、実際にはJWTから取得
-                
+
                 return user_key, user_role
             except Exception as e:
                 logger.warning(f"Failed to extract user from token: {e}")
-        
+
         # 認証されていない場合はIPアドレスを使用
         client_ip = self._get_client_ip(request)
         return f"ip:{client_ip}", "anonymous"
