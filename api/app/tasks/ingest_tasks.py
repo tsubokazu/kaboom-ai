@@ -20,13 +20,15 @@ logger = get_task_logger(__name__)
     retry_backoff=True,
     retry_jitter=True,
     max_retries=3,
+    soft_time_limit=1800,  # 30分のソフト制限
+    time_limit=3600,       # 1時間のハード制限
 )
 def run_daily_ingest_task(
     self,
     interval_days: Optional[Dict[str, int]] = None,
     market: str = "TSE_PRIME",
     symbols: Optional[list[str]] = None,
-    chunk_size: int = 5_000,
+    chunk_size: int = 10_000,
 ) -> Dict[str, object]:
     """Supabase銘柄の日次バックフィルをCeleryタスクとして実行する。"""
 

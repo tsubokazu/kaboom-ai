@@ -47,8 +47,8 @@ celery_app.conf.update(
     result_persistent=True,        # 永続化
     
     # タスクタイムアウト設定
-    task_soft_time_limit=300,      # ソフト制限（5分）
-    task_time_limit=600,           # ハード制限（10分）
+    task_soft_time_limit=1800,     # ソフト制限（30分）
+    task_time_limit=3600,          # ハード制限（1時間）
     
     # ルーティング設定（優先度別キュー）
     task_routes={
