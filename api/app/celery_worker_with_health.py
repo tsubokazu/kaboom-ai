@@ -100,15 +100,17 @@ class CeleryWorkerHealthServer:
             ]
 
             # カスタムワーカーイベント処理
-            @self.celery_app.signals.task_success.connect
+            from celery import signals
+
+            @signals.task_success.connect
             def task_success_handler(sender=None, result=None, **kwargs):
                 self.stats["processed_tasks"] += 1
 
-            @self.celery_app.signals.task_failure.connect
+            @signals.task_failure.connect
             def task_failure_handler(sender=None, task_id=None, exception=None, einfo=None, **kwargs):
                 self.stats["failed_tasks"] += 1
 
-            @self.celery_app.signals.worker_ready.connect
+            @signals.worker_ready.connect
             def worker_ready_handler(sender=None, **kwargs):
                 self.stats["status"] = "running"
                 logger.info("Celery worker is ready")
