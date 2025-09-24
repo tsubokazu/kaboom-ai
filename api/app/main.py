@@ -16,6 +16,7 @@ from app.routers.frontend_integration import router as frontend_router
 from app.routers.portfolios_db import router as portfolios_router
 from app.routers.trades_db import router as trades_router
 from app.routers.ingest import router as ingest_router
+from app.routers.job_progress import router as job_progress_router
 from app.websocket.routes import router as websocket_router
 from app.websocket.manager import websocket_manager
 from app.services.routes import router as services_router
@@ -148,6 +149,7 @@ app.include_router(trading_router) # 外部取引所統合
 app.include_router(frontend_router) # フロントエンド統合
 app.include_router(portfolios_router)  # ポートフォリオ管理
 app.include_router(trades_router)      # 取引管理
+app.include_router(job_progress_router) # ジョブ進捗追跡
 app.include_router(websocket_router, tags=["WebSocket"])
 app.include_router(services_router)
 app.include_router(ingest_router)      # データインジェスト
