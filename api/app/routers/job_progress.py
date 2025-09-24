@@ -5,7 +5,7 @@
 """
 from typing import List, Optional, Dict, Any
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Query
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
@@ -77,7 +77,7 @@ async def get_job_progress(
 @router.get("/progress", response_model=List[JobProgressResponse])
 async def list_job_progress(
     status_filter: Optional[str] = None,
-    limit: int = Field(default=20, le=100),
+    limit: int = Query(default=20, le=100),
     progress_service: JobProgressService = Depends(get_job_progress_service),
     # current_user = Depends(get_current_user)  # テスト用に認証無効化
 ) -> List[JobProgressResponse]:
@@ -180,7 +180,7 @@ async def cancel_job(
 
 @router.post("/progress/cleanup")
 async def cleanup_old_jobs(
-    retention_hours: int = Field(default=168, ge=1, le=8760),  # 1時間〜1年
+    retention_hours: int = Query(default=168, ge=1, le=8760),  # 1時間〜1年
     progress_service: JobProgressService = Depends(get_job_progress_service),
     # current_user = Depends(get_current_user)  # テスト用に認証無効化
 ) -> JSONResponse:
