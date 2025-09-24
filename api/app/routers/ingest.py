@@ -11,6 +11,7 @@ from pydantic import BaseModel, Field
 
 from app.config.settings import settings
 from app.services.redis_client import RedisClient, get_redis_client
+from app.services.job_progress_service import JobProgressService, get_job_progress_service
 from app.tasks.celery_app import celery_app
 from app.tasks.ingest_tasks import run_daily_ingest_task
 from batch.scripts.run_daily_ingest import DEFAULT_INTERVAL_DAYS
@@ -52,6 +53,13 @@ class IngestJobDetail(BaseModel):
     symbols: Optional[list[str]] = None
     result: Optional[Dict[str, Any]] = None
     error: Optional[str] = None
+    # Progress tracking integration
+    progress_percent: Optional[float] = None
+    current_step: Optional[str] = None
+    total_steps: Optional[int] = None
+    completed_steps: Optional[int] = None
+    processing_details: Optional[Dict[str, Any]] = None
+    metrics: Optional[Dict[str, Any]] = None
 
 
 async def _require_ingest_token(x_ingest_token: Optional[str] = Header(None)) -> None:
@@ -122,6 +130,7 @@ async def _build_job_detail(
     redis_client: RedisClient,
     *,
     allow_missing: bool = False,
+    progress_service: Optional[JobProgressService] = None,
 ) -> Optional[IngestJobDetail]:
     async_result = AsyncResult(job_id, app=celery_app)
     metadata = await _load_job_metadata(redis_client, job_id)
@@ -162,6 +171,28 @@ async def _build_job_detail(
         except Exception:  # noqa: BLE001
             error = async_result.traceback
 
+    # Progress tracking integration
+    progress_percent = None
+    current_step = None
+    total_steps = None
+    completed_steps = None
+    processing_details = None
+    metrics = None
+
+    if progress_service:
+        try:
+            progress_info = await progress_service.get_job_progress(job_id)
+            if progress_info:
+                progress_percent = progress_info.progress_percent
+                current_step = progress_info.current_step
+                total_steps = progress_info.total_steps
+                completed_steps = progress_info.completed_steps
+                processing_details = progress_info.processing_details
+                metrics = progress_info.metrics
+        except Exception:
+            # Progress情報の取得に失敗してもメインレスポンスには影響しない
+            pass
+
     return IngestJobDetail(
         job_id=job_id,
         status=status,
@@ -173,6 +204,12 @@ async def _build_job_detail(
         symbols=metadata.get("symbols"),
         result=result,
         error=error,
+        progress_percent=progress_percent,
+        current_step=current_step,
+        total_steps=total_steps,
+        completed_steps=completed_steps,
+        processing_details=processing_details,
+        metrics=metrics,
     )
 
 
@@ -217,6 +254,7 @@ async def list_all_jobs(
     limit: int = 10,
     _: None = Depends(_require_ingest_token),
     redis_client: RedisClient = Depends(get_redis_client),
+    progress_service: JobProgressService = Depends(get_job_progress_service),
 ) -> List[IngestJobDetail]:
     """全ジョブリストを取得（ステータスフィルタ・件数制限対応）"""
 
@@ -231,7 +269,7 @@ async def list_all_jobs(
 
     jobs: List[IngestJobDetail] = []
     for job_id in raw_ids:
-        detail = await _build_job_detail(job_id, redis_client, allow_missing=True)
+        detail = await _build_job_detail(job_id, redis_client, allow_missing=True, progress_service=progress_service)
         if not detail:
             continue
         if status and detail.status != status:
@@ -248,10 +286,11 @@ async def get_ingest_job(
     job_id: str,
     _: None = Depends(_require_ingest_token),
     redis_client: RedisClient = Depends(get_redis_client),
+    progress_service: JobProgressService = Depends(get_job_progress_service),
 ) -> IngestJobDetail:
-    """実行中または完了済みジョブの状態を返す。"""
+    """実行中または完了済みジョブの状態を返す（進捗情報統合）。"""
 
-    detail = await _build_job_detail(job_id, redis_client)
+    detail = await _build_job_detail(job_id, redis_client, progress_service=progress_service)
     return detail
 
 
@@ -259,6 +298,7 @@ async def get_ingest_job(
 async def get_job_stats(
     _: None = Depends(_require_ingest_token),
     redis_client: RedisClient = Depends(get_redis_client),
+    progress_service: JobProgressService = Depends(get_job_progress_service),
 ) -> Dict[str, Any]:
     """ジョブ統計情報を取得"""
 
@@ -270,7 +310,7 @@ async def get_job_stats(
     status_counts: Dict[str, int] = {}
 
     for job_id in raw_ids:
-        detail = await _build_job_detail(job_id, redis_client, allow_missing=True)
+        detail = await _build_job_detail(job_id, redis_client, allow_missing=True, progress_service=progress_service)
         if not detail:
             continue
         status_counts[detail.status] = status_counts.get(detail.status, 0) + 1

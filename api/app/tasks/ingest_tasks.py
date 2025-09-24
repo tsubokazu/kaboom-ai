@@ -81,8 +81,11 @@ async def _run_ingest_with_progress(
     try:
         # 進捗サービス初期化
         from app.services.job_progress_service import JobProgressService, JobStatus
-        from app.services.redis_client import redis_client
+        from app.services.redis_client import RedisClient
 
+        # Celeryワーカー環境でRedisクライアント初期化
+        redis_client = RedisClient()
+        await redis_client.connect()
         progress_service = JobProgressService(redis_client)
 
         # Step 1: ジョブ開始
