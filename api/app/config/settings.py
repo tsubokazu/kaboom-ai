@@ -58,6 +58,11 @@ class Settings:
     # Background Tasks
     CELERY_BROKER_URL: str = os.getenv("CELERY_BROKER_URL", REDIS_URL)
     CELERY_RESULT_BACKEND: str = os.getenv("CELERY_RESULT_BACKEND", REDIS_URL)
+
+    # Cloud Tasks Configuration
+    USE_CLOUD_TASKS: bool = os.getenv("USE_CLOUD_TASKS", "false").lower() == "true"
+    CLOUD_TASKS_LOCATION: str = os.getenv("CLOUD_TASKS_LOCATION", "asia-northeast1")
+    CLOUD_RUN_SERVICE_URL: str = os.getenv("CLOUD_RUN_SERVICE_URL", "http://localhost:8080")
     
     # Market Data Configuration
     MARKET_DATA_UPDATE_INTERVAL: int = int(os.getenv("MARKET_DATA_UPDATE_INTERVAL", "5"))  # seconds

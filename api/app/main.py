@@ -16,6 +16,7 @@ from app.routers.frontend_integration import router as frontend_router
 from app.routers.portfolios_db import router as portfolios_router
 from app.routers.trades_db import router as trades_router
 from app.routers.ingest import router as ingest_router
+from app.routers.internal import router as internal_router
 from app.routers.job_progress import router as job_progress_router
 from app.websocket.routes import router as websocket_router
 from app.websocket.manager import websocket_manager
@@ -153,6 +154,7 @@ app.include_router(job_progress_router) # ジョブ進捗追跡
 app.include_router(websocket_router, tags=["WebSocket"])
 app.include_router(services_router)
 app.include_router(ingest_router)      # データインジェスト
+app.include_router(internal_router)    # 内部エンドポイント（Cloud Tasks用）
 
 # Root endpoint only (health endpoints are in routers/health.py)
 

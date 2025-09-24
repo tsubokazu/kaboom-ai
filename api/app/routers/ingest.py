@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
@@ -14,6 +15,7 @@ from app.services.redis_client import RedisClient, get_redis_client
 from app.services.job_progress_service import JobProgressService, get_job_progress_service
 from app.tasks.celery_app import celery_app
 from app.tasks.ingest_tasks import run_daily_ingest_task
+from app.services.cloud_tasks import CloudTasksClient, get_cloud_tasks_client
 from batch.scripts.run_daily_ingest import DEFAULT_INTERVAL_DAYS
 
 router = APIRouter(prefix="/api/v1/ingest", tags=["Ingest"])
@@ -218,22 +220,36 @@ async def trigger_daily_ingest(
     payload: IngestRequest,
     x_ingest_token: Optional[str] = Header(None),
     redis_client: RedisClient = Depends(get_redis_client),
+    cloud_tasks_client: CloudTasksClient = Depends(get_cloud_tasks_client),
 ) -> IngestJobResponse:
-    """Supabase銘柄を対象に日次バックフィルを非同期実行する。"""
+    """Supabase銘柄を対象に日次バックフィルを非同期実行する（Cloud Tasks版）。"""
 
     await _require_ingest_token(x_ingest_token)
 
     interval_days = payload.intervals or dict(DEFAULT_INTERVAL_DAYS)
     requested_at = datetime.utcnow().isoformat() + "Z"
 
-    # Celeryタスクとして実行（適切なキュー管理）
-    task = run_daily_ingest_task.delay(
-        interval_days=interval_days,
-        market=payload.market,
-        symbols=payload.symbols,
-        chunk_size=payload.chunk_size,
-    )
-    job_id = task.id
+    # Cloud Tasks環境変数チェック
+    use_cloud_tasks = os.getenv("USE_CLOUD_TASKS", "false").lower() == "true"
+
+    if use_cloud_tasks:
+        # Cloud Tasksとして実行
+        job_id = await cloud_tasks_client.create_ingest_task(
+            interval_days=interval_days,
+            market=payload.market,
+            symbols=payload.symbols,
+            chunk_size=payload.chunk_size,
+        )
+    else:
+        # 従来のCeleryタスクとして実行（フォールバック）
+        task = run_daily_ingest_task.delay(
+            interval_days=interval_days,
+            market=payload.market,
+            symbols=payload.symbols,
+            chunk_size=payload.chunk_size,
+        )
+        job_id = task.id
+
     metadata = {
         "job_id": job_id,
         "status": "queued",
@@ -242,6 +258,7 @@ async def trigger_daily_ingest(
         "market": payload.market,
         "symbols": payload.symbols,
         "chunk_size": payload.chunk_size,
+        "executor": "cloud_tasks" if use_cloud_tasks else "celery",
     }
     await _store_job_metadata(redis_client, metadata)
 
