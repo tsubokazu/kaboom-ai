@@ -1,13 +1,9 @@
-# 注意: Celeryワーカーを無効化 - 代わりにCloud Jobs使用検討
-# CeleryワーカーはHTTPサーバーではないため、Cloud Runのヘルスチェックに失敗
-# 一時的に無効化し、後でCloud Jobs (batch.googleapis.com) として実装予定
-
-# apiVersion: serving.knative.dev/v1
-# kind: Service
-# metadata:
-#   name: kaboom-celery-worker
-#   annotations:
-#     run.googleapis.com/ingress: internal  # ワーカーには内部アクセスのみ
+apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  name: kaboom-celery-worker
+  annotations:
+    run.googleapis.com/ingress: internal  # ワーカーには内部アクセスのみ
 spec:
   template:
     metadata:
@@ -33,16 +29,11 @@ spec:
       - name: kaboom-celery-worker
         image: ${IMAGE}
 
-        # Celeryワーカー起動コマンド
-        command: ["celery"]
+        # Celeryワーカー + HTTPヘルスチェックサーバー起動
+        command: ["python"]
         args:
-          - "-A"
-          - "app.tasks.celery_app"
-          - "worker"
-          - "--loglevel=info"
-          - "--queues=ingest,ai_analysis,backtest,market_data,notifications"
-          - "--concurrency=4"
-          - "--prefetch-multiplier=1"
+          - "-m"
+          - "app.celery_worker_with_health"
 
         # リソース制限（Celeryワーカー用に調整）
         resources:
@@ -144,5 +135,24 @@ spec:
               name: jwt-secret-key
               key: latest
 
-        # Celeryワーカー用ヘルスチェック（HTTPベース）
-        # 注意: Celeryワーカーはバックグラウンドサービスのためヘルスチェック削除
+        # HTTPヘルスチェック（統合サーバー対応）
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 30
+          periodSeconds: 60
+          timeoutSeconds: 10
+
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 10
+          periodSeconds: 30
+          timeoutSeconds: 5
+
+        # ポート設定
+        ports:
+        - name: http1
+          containerPort: 8080
