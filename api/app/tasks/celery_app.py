@@ -23,7 +23,8 @@ celery_app = Celery(
         "app.tasks.ai_analysis_tasks",
         "app.tasks.backtest_tasks", 
         "app.tasks.market_data_tasks",
-        "app.tasks.notification_tasks"
+        "app.tasks.notification_tasks",
+        "app.tasks.ingest_tasks",
     ]
 )
 
@@ -54,7 +55,8 @@ celery_app.conf.update(
         "app.tasks.ai_analysis_tasks.*": {"queue": "ai_analysis"},
         "app.tasks.backtest_tasks.*": {"queue": "backtest"},
         "app.tasks.market_data_tasks.*": {"queue": "market_data"},
-        "app.tasks.notification_tasks.*": {"queue": "notifications"}
+        "app.tasks.notification_tasks.*": {"queue": "notifications"},
+        "app.tasks.ingest_tasks.*": {"queue": "ingest"},
     },
     
     # キュー設定（優先度付き）
@@ -91,7 +93,15 @@ celery_app.conf.update(
             routing_key="backtest",
             queue_arguments={"x-max-priority": 4}
         ),
-        
+
+        # インジェスト: バッチバックフィル処理
+        Queue(
+            "ingest",
+            Exchange("ingest"),
+            routing_key="ingest",
+            queue_arguments={"x-max-priority": 5}
+        ),
+
         # デフォルト
         Queue("default"),
     ),
