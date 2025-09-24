@@ -134,44 +134,90 @@ async def _build_job_detail(
     allow_missing: bool = False,
     progress_service: Optional[JobProgressService] = None,
 ) -> Optional[IngestJobDetail]:
-    async_result = AsyncResult(job_id, app=celery_app)
     metadata = await _load_job_metadata(redis_client, job_id)
 
-    if metadata is None and async_result.state == "PENDING" and not allow_missing:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job not found")
-    if metadata is None and allow_missing:
-        if async_result.state == "PENDING":
-            return None
-        metadata = {
-            "job_id": job_id,
-            "requested_at": None,
-            "intervals": {},
-            "market": "TSE_PRIME",
-            "symbols": None,
-        }
+    # Cloud Tasks使用時の判定
+    use_cloud_tasks = metadata and metadata.get("executor") == "cloud_tasks"
 
-    status = _map_state_to_status(async_result.state)
-    completed_at = None
-    if status == "completed" and async_result.date_done:
-        completed_at = async_result.date_done.isoformat()
+    if use_cloud_tasks:
+        # Cloud Tasks使用時: Redisの進捗情報ベースで状態判定
+        if metadata is None and not allow_missing:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job not found")
+        if metadata is None and allow_missing:
+            return None
+
+        # 進捗情報から状態判定
+        status = "queued"  # デフォルト
+        completed_at = None
+
+        if progress_service:
+            try:
+                progress_info = await progress_service.get_job_progress(job_id)
+                if progress_info:
+                    if progress_info.status == "completed":
+                        status = "completed"
+                        completed_at = progress_info.updated_at.isoformat() if progress_info.updated_at else None
+                    elif progress_info.status == "failed":
+                        status = "failed"
+                    elif progress_info.status == "running":
+                        status = "running"
+            except Exception:
+                pass  # 進捗情報取得失敗時はデフォルトのqueuedのまま
+
+    else:
+        # 従来のCelery使用時
+        async_result = AsyncResult(job_id, app=celery_app)
+
+        if metadata is None and async_result.state == "PENDING" and not allow_missing:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job not found")
+        if metadata is None and allow_missing:
+            if async_result.state == "PENDING":
+                return None
+            metadata = {
+                "job_id": job_id,
+                "requested_at": None,
+                "intervals": {},
+                "market": "TSE_PRIME",
+                "symbols": None,
+            }
+
+        status = _map_state_to_status(async_result.state)
+        completed_at = None
+        if status == "completed" and async_result.date_done:
+            completed_at = async_result.date_done.isoformat()
 
     result: Optional[Dict[str, Any]] = None
     error: Optional[str] = None
-    if status == "completed":
-        try:
-            result_data = async_result.result
-            if isinstance(result_data, dict):
-                result = result_data
-            else:
-                result = json.loads(json.dumps(result_data, default=str))
-        except Exception:  # noqa: BLE001 - 変換時は失敗しても無視
-            result = None
-    elif status in {"failed", "revoked"}:
-        try:
-            error_obj = async_result.result
-            error = str(error_obj) if error_obj is not None else async_result.traceback
-        except Exception:  # noqa: BLE001
-            error = async_result.traceback
+
+    if use_cloud_tasks:
+        # Cloud Tasks使用時: 進捗サービスから結果・エラー取得
+        if progress_service:
+            try:
+                progress_info = await progress_service.get_job_progress(job_id)
+                if progress_info:
+                    if progress_info.result_data:
+                        result = progress_info.result_data
+                    if progress_info.error_message:
+                        error = progress_info.error_message
+            except Exception:
+                pass
+    else:
+        # 従来のCelery使用時
+        if status == "completed":
+            try:
+                result_data = async_result.result
+                if isinstance(result_data, dict):
+                    result = result_data
+                else:
+                    result = json.loads(json.dumps(result_data, default=str))
+            except Exception:  # noqa: BLE001 - 変換時は失敗しても無視
+                result = None
+        elif status in {"failed", "revoked"}:
+            try:
+                error_obj = async_result.result
+                error = str(error_obj) if error_obj is not None else async_result.traceback
+            except Exception:  # noqa: BLE001
+                error = async_result.traceback
 
     # Progress tracking integration
     progress_percent = None
