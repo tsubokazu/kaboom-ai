@@ -42,7 +42,7 @@ class CloudTasksClient:
         payload: Dict[str, Any],
         task_id: Optional[str] = None,
         schedule_time: Optional[datetime] = None,
-        timeout_seconds: int = 3600
+        timeout_seconds: int = 1800
     ) -> str:
         """
         Cloud Task を作成
@@ -138,7 +138,7 @@ class CloudTasksClient:
             queue="ingest-jobs",
             url="/internal/ingest/run-daily",
             payload=payload,
-            timeout_seconds=3600
+            timeout_seconds=1800
         )
 
     async def get_task_status(self, queue: str, task_id: str) -> Optional[Dict[str, Any]]:
