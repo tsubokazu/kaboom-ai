@@ -95,6 +95,7 @@ async def execute_daily_ingest(
 
     try:
         # Step 1: ジョブ開始
+        logger.info(f"[execute_daily_ingest] Creating job progress for {job_id}")
         await progress_service.create_job(
             job_id=job_id,
             total_steps=100,
@@ -107,14 +108,17 @@ async def execute_daily_ingest(
                 "executor": "cloud_tasks"
             }
         )
+        logger.info(f"[execute_daily_ingest] Job progress created for {job_id}")
 
         # Step 2: 実行開始
+        logger.info(f"[execute_daily_ingest] Updating progress to RUNNING for {job_id}")
         await progress_service.update_progress(
             job_id=job_id,
             status=JobStatus.RUNNING,
             progress_percent=10.0,
             current_step="Starting data ingestion process"
         )
+        logger.info(f"[execute_daily_ingest] Progress updated to RUNNING for {job_id}")
 
         # Step 3: 実際のデータ取得実行（同期処理）
         def run_ingest_sync():
@@ -138,11 +142,13 @@ async def execute_daily_ingest(
         result = await loop.run_in_executor(None, run_ingest_sync)
 
         # Step 4: 完了処理
+        logger.info(f"[execute_daily_ingest] Setting job result to COMPLETED for {job_id}")
         await progress_service.set_job_result(
             job_id=job_id,
             result_data=result,
             status=JobStatus.COMPLETED
         )
+        logger.info(f"[execute_daily_ingest] Job result set to COMPLETED for {job_id}")
 
         logger.info(
             f"[execute_daily_ingest] Completed job_id={job_id} "
