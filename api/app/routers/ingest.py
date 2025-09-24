@@ -157,12 +157,12 @@ async def _build_job_detail(
                 progress_info = await progress_service.get_job_progress(job_id)
                 logger.info(f"[_build_job_detail] Cloud Tasks job {job_id}: progress_info={progress_info.status if progress_info else None}")
                 if progress_info:
-                    if progress_info.status == "completed":
+                    if progress_info.status.value == "completed":
                         status = "completed"
                         completed_at = progress_info.updated_at.isoformat() if progress_info.updated_at else None
-                    elif progress_info.status == "failed":
+                    elif progress_info.status.value == "failed":
                         status = "failed"
-                    elif progress_info.status == "running":
+                    elif progress_info.status.value == "running":
                         status = "running"
                     logger.info(f"[_build_job_detail] Cloud Tasks job {job_id}: status updated to {status}")
             except Exception as e:
