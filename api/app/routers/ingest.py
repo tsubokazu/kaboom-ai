@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import os
+import logging
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
@@ -19,6 +20,7 @@ from app.services.cloud_tasks import CloudTasksClient, get_cloud_tasks_client
 from batch.scripts.run_daily_ingest import DEFAULT_INTERVAL_DAYS
 
 router = APIRouter(prefix="/api/v1/ingest", tags=["Ingest"])
+logger = logging.getLogger(__name__)
 
 
 class IngestRequest(BaseModel):
@@ -153,6 +155,7 @@ async def _build_job_detail(
         if progress_service:
             try:
                 progress_info = await progress_service.get_job_progress(job_id)
+                logger.info(f"[_build_job_detail] Cloud Tasks job {job_id}: progress_info={progress_info.status if progress_info else None}")
                 if progress_info:
                     if progress_info.status == "completed":
                         status = "completed"
@@ -161,7 +164,9 @@ async def _build_job_detail(
                         status = "failed"
                     elif progress_info.status == "running":
                         status = "running"
-            except Exception:
+                    logger.info(f"[_build_job_detail] Cloud Tasks job {job_id}: status updated to {status}")
+            except Exception as e:
+                logger.error(f"[_build_job_detail] Progress service error for {job_id}: {e}")
                 pass  # 進捗情報取得失敗時はデフォルトのqueuedのまま
 
     else:
