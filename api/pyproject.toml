@@ -40,6 +40,9 @@ dependencies = [
     # CloudRun Support
     "gunicorn>=21.2.0,<24.0.0",
     "influxdb3-python>=0.16.0",
+    # Google Cloud Services
+    "google-cloud-tasks>=2.16.0,<3.0.0",
+    "PyJWT>=2.8.0,<3.0.0",
 ]
 
 [project.optional-dependencies]
