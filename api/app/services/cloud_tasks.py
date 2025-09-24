@@ -76,7 +76,7 @@ class CloudTasksClient:
             # フルURL構築
             full_url = f"{self.service_url.rstrip('/')}{url}"
 
-            # Cloud Task構築
+            # Cloud Task構築（OIDC認証付き）
             task = {
                 "name": f"{queue_path}/tasks/{task_id}",
                 "http_request": {
@@ -86,6 +86,10 @@ class CloudTasksClient:
                         "Content-Type": "application/json",
                     },
                     "body": json.dumps(task_payload, default=str).encode(),
+                    "oidc_token": {
+                        "service_account_email": f"657734233816-compute@developer.gserviceaccount.com",
+                        "audience": full_url
+                    }
                 },
                 "dispatch_deadline": timedelta(seconds=timeout_seconds)
             }
