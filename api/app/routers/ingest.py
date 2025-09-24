@@ -15,6 +15,42 @@ from app.tasks.celery_app import celery_app
 from app.tasks.ingest_tasks import run_daily_ingest_task
 from batch.scripts.run_daily_ingest import DEFAULT_INTERVAL_DAYS
 
+import logging
+logger = logging.getLogger(__name__)
+
+async def run_async_ingest_task(job_id: str, interval_days: Dict[str, int], market: str, symbols: Optional[list[str]], chunk_size: int, redis_client: RedisClient):
+    """非同期でingestタスクを実行する代替関数"""
+    try:
+        # ジョブステータス更新: running
+        metadata = {
+            "job_id": job_id,
+            "status": "running",
+            "started_at": datetime.utcnow().isoformat() + "Z",
+            "intervals": interval_days,
+            "market": market,
+            "symbols": symbols,
+            "chunk_size": chunk_size,
+        }
+        await _store_job_metadata(redis_client, metadata)
+
+        # 実際のingest処理を実行
+        from batch.scripts.run_daily_ingest import run_daily_ingest
+        result = run_daily_ingest(interval_days, market, symbols, chunk_size)
+
+        # ジョブステータス更新: completed
+        metadata["status"] = "completed"
+        metadata["completed_at"] = datetime.utcnow().isoformat() + "Z"
+        metadata["result"] = result
+        await _store_job_metadata(redis_client, metadata)
+
+    except Exception as e:
+        # ジョブステータス更新: failed
+        metadata["status"] = "failed"
+        metadata["error"] = str(e)
+        metadata["completed_at"] = datetime.utcnow().isoformat() + "Z"
+        await _store_job_metadata(redis_client, metadata)
+        logger.exception(f"Async ingest task {job_id} failed: {e}")
+
 router = APIRouter(prefix="/api/v1/ingest", tags=["Ingest"])
 
 
@@ -189,14 +225,26 @@ async def trigger_daily_ingest(
     interval_days = payload.intervals or dict(DEFAULT_INTERVAL_DAYS)
     requested_at = datetime.utcnow().isoformat() + "Z"
 
-    task = run_daily_ingest_task.delay(
-        interval_days=interval_days,
-        market=payload.market,
-        symbols=payload.symbols,
-        chunk_size=payload.chunk_size,
-    )
+    # 一時的にCelery無効化 - 直接同期実行
+    import uuid
+    job_id = str(uuid.uuid4()).replace('-', '')
 
-    job_id = task.id
+    # Celeryワーカーの代わりに直接実行（本番環境用の一時的措置）
+    try:
+        from batch.scripts.run_daily_ingest import run_daily_ingest
+        # バックグラウンドで実行（非同期化）
+        import asyncio
+        asyncio.create_task(run_async_ingest_task(job_id, interval_days, payload.market, payload.symbols, payload.chunk_size, redis_client))
+    except Exception as e:
+        logger.error(f"Direct ingest execution setup failed: {e}")
+        # フォールバック: Celeryタスク
+        task = run_daily_ingest_task.delay(
+            interval_days=interval_days,
+            market=payload.market,
+            symbols=payload.symbols,
+            chunk_size=payload.chunk_size,
+        )
+        job_id = task.id
     metadata = {
         "job_id": job_id,
         "status": "queued",

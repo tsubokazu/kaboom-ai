@@ -1,9 +1,13 @@
-apiVersion: serving.knative.dev/v1
-kind: Service
-metadata:
-  name: kaboom-celery-worker
-  annotations:
-    run.googleapis.com/ingress: internal  # ワーカーには内部アクセスのみ
+# 注意: Celeryワーカーを無効化 - 代わりにCloud Jobs使用検討
+# CeleryワーカーはHTTPサーバーではないため、Cloud Runのヘルスチェックに失敗
+# 一時的に無効化し、後でCloud Jobs (batch.googleapis.com) として実装予定
+
+# apiVersion: serving.knative.dev/v1
+# kind: Service
+# metadata:
+#   name: kaboom-celery-worker
+#   annotations:
+#     run.googleapis.com/ingress: internal  # ワーカーには内部アクセスのみ
 spec:
   template:
     metadata:

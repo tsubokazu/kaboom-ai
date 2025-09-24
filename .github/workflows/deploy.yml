@@ -52,16 +52,18 @@ jobs:
             --platform managed \
             --allow-unauthenticated
 
-      - name: Deploy Celery worker service
-        run: |
-          IMAGE="${{ env.REGION }}-docker.pkg.dev/${PROJECT_ID}/${REPOSITORY}/${SERVICE}:${{ github.sha }}"
-          if ! command -v envsubst >/dev/null 2>&1; then
-            sudo apt-get update
-            sudo apt-get install -y gettext-base
-          fi
-          export IMAGE
-          envsubst < "$WORKER_MANIFEST" > /tmp/celery-worker.yaml
-          gcloud run services replace /tmp/celery-worker.yaml \
-            --region "$REGION" \
-            --platform managed \
-            --project "$PROJECT_ID"
+      # Celeryワーカーデプロイ無効化 - Cloud Runの制約によりHTTPヘルスチェックに失敗
+      # 将来的にCloud Jobs (batch.googleapis.com) で実装予定
+      # - name: Deploy Celery worker service
+      #   run: |
+      #     IMAGE="${{ env.REGION }}-docker.pkg.dev/${PROJECT_ID}/${REPOSITORY}/${SERVICE}:${{ github.sha }}"
+      #     if ! command -v envsubst >/dev/null 2>&1; then
+      #       sudo apt-get update
+      #       sudo apt-get install -y gettext-base
+      #     fi
+      #     export IMAGE
+      #     envsubst < "$WORKER_MANIFEST" > /tmp/celery-worker.yaml
+      #     gcloud run services replace /tmp/celery-worker.yaml \
+      #       --region "$REGION" \
+      #       --platform managed \
+      #       --project "$PROJECT_ID"
