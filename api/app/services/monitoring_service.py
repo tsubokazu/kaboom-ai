@@ -210,6 +210,10 @@ class MonitoringService:
     async def _save_metrics_to_redis(self, metrics: SystemMetrics):
         """メトリクスをRedisに保存"""
         try:
+            # Redis接続確認
+            if not redis_client.client:
+                await redis_client.connect()
+
             key = f"metrics:{metrics.timestamp.strftime('%Y%m%d%H%M')}"
             data = {
                 "timestamp": metrics.timestamp.isoformat(),
@@ -223,7 +227,7 @@ class MonitoringService:
                 "database_connections": metrics.database_connections,
                 "redis_memory_usage": metrics.redis_memory_usage
             }
-            
+
             await redis_client.set(key, json.dumps(data), expire=86400)  # 24時間保持
         except Exception as e:
             logger.error(f"Failed to save metrics to Redis: {e}")
@@ -340,6 +344,10 @@ class MonitoringService:
                 "resolved": alert.resolved
             }
             
+            # Redis接続確認
+            if not redis_client.client:
+                await redis_client.connect()
+
             await redis_client.set(key, json.dumps(data), expire=604800)  # 7日間保持
         except Exception as e:
             logger.error(f"Failed to save alert to Redis: {e}")
@@ -347,6 +355,10 @@ class MonitoringService:
     async def _broadcast_metrics(self, metrics: SystemMetrics):
         """メトリクスをWebSocketで配信"""
         try:
+            # Redis接続確認
+            if not redis_client.client:
+                await redis_client.connect()
+
             await redis_client.publish("system_metrics", json.dumps({
                 "type": "metrics",
                 "data": {
@@ -368,6 +380,10 @@ class MonitoringService:
     async def _broadcast_alert(self, alert: Alert):
         """アラートをWebSocketで配信"""
         try:
+            # Redis接続確認
+            if not redis_client.client:
+                await redis_client.connect()
+
             await redis_client.publish("system_alerts", json.dumps({
                 "type": "alert",
                 "data": {
@@ -441,6 +457,10 @@ class MonitoringService:
     async def _broadcast_alert_resolution(self, alert: Alert):
         """アラート解決をWebSocketで配信"""
         try:
+            # Redis接続確認
+            if not redis_client.client:
+                await redis_client.connect()
+
             await redis_client.publish("system_alerts", json.dumps({
                 "type": "alert_resolved",
                 "data": {
