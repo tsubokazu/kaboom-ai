@@ -1,7 +1,7 @@
 # CLAUDE.md
 
 This document explains how to work with the Kaboom project, with special focus on
-FastAPI, Celery, and Redis development patterns now that the ingestion and
+FastAPI, Cloud Tasks, and Redis development patterns now that the ingestion and
 analysis pipelines are running on Cloud Run + n8n.
 
 ## Repository at a Glance
@@ -9,7 +9,7 @@ analysis pipelines are running on Cloud Run + n8n.
 ```
 /
 ├── api/                 # FastAPI application (deployed to Cloud Run)
-│   ├── app/             # Routers, services, middleware, celery tasks
+│   ├── app/             # Routers, services, middleware, cloud tasks
 │   ├── batch/           # Data ingestion + universe selection pipelines
 │   ├── Dockerfile       # Cloud Run image (Artifact Registry)
 │   └── ...
@@ -24,8 +24,8 @@ Important entry points:
   realtime, monitoring services).
 - `api/app/routers/*` – REST API endpoints. Universe selection API has **not** been
   implemented yet; it currently runs via CLI/n8n.
-- `api/app/tasks/*` – Celery task definitions (market data, AI analysis, etc.).
-- `api/app/services/*` – Reusable services (Redis, monitoring, portfolio, trading).
+- `api/app/tasks/*` – Legacy Celery task definitions (being migrated to Cloud Tasks).
+- `api/app/services/*` – Reusable services (Redis, monitoring, portfolio, trading, cloud_tasks).
 - `api/batch/*` – Ingestion & universe selection pipelines used by Cloud Run jobs
   and n8n.
 
@@ -54,36 +54,55 @@ Important entry points:
 
 4. **Job APIs (long running)**
    - For heavy tasks (ingestion, analysis), expose two endpoints:
-     1. `POST /.../run` → enqueue a Celery task, return `job_id`.
+     1. `POST /.../run` → enqueue a Cloud Task (or Celery if legacy), return `job_id`.
      2. `GET /.../jobs/{job_id}` → read status/result from Redis or DB.
    - Follow the pattern already used by `/api/v1/ingest/run-daily`.
+   - Use `USE_CLOUD_TASKS` environment variable to switch between Cloud Tasks and Celery.
 
 5. **Error Handling & Logging**
    - Log errors with `logger.error(...)` including context.
    - Bubble exceptions to FastAPI so they become 500 unless handled.
    - For Cloud Run health checks, keep endpoints fast and free of heavy dependencies.
 
-## Celery Guidelines
+## Cloud Tasks Guidelines (Primary)
 
-1. **Celery App**
+1. **Cloud Tasks Service**
+   - Implemented in `api/app/services/cloud_tasks.py`.
+   - Uses HTTP PUSH targets to call internal Cloud Run endpoints.
+   - Configured via `USE_CLOUD_TASKS`, `CLOUD_TASKS_LOCATION`, `CLOUD_RUN_SERVICE_URL` environment variables.
+
+2. **Task Structure**
+   - Public endpoint (e.g., `POST /api/v1/ingest/run-daily`) creates Cloud Task and returns `job_id`.
+   - Internal endpoint (e.g., `POST /internal/ingest/run-daily`) executes actual work.
+   - Internal endpoints are secured with OIDC token authentication.
+
+3. **Job Status Tracking**
+   - Use `RedisClient.set_job_status(job_id, status, result)` to update state.
+   - Status enum values: `queued`, `running`, `completed`, `failed`.
+   - Always use `.value` when comparing JobStatus enums: `status.value == "completed"`.
+
+4. **Best Practices**
+   - Keep tasks idempotent; running the same task twice should not corrupt data.
+   - Handle Cloud Tasks 30-minute timeout limit.
+   - Use proper error handling and status updates in internal endpoints.
+   - Test with `gcloud tasks run` for manual execution.
+
+## Celery Guidelines (Legacy - Being Migrated)
+
+1. **Migration Status**
+   - Ingestion jobs have been migrated to Cloud Tasks.
+   - Other jobs (universe selection, analysis) still use Celery.
+   - Use `USE_CLOUD_TASKS=false` to fall back to Celery if needed.
+
+2. **Legacy Celery App**
    - Defined in `api/app/tasks/celery_app.py`. Import tasks in `app/tasks/__init__.py`
      so Celery discovers them.
    - Configure broker/backend via `CELERY_BROKER_URL` / `CELERY_RESULT_BACKEND` (Redis by default).
 
-2. **Defining Tasks**
-   - Place in `api/app/tasks/<feature>_tasks.py`.
-   - Use `@celery_app.task(bind=True, name="app.tasks.xxx")` to name tasks clearly.
-   - Return structured dicts (status, data, error) that API clients can consume.
-
-3. **Job Status Tracking**
-   - Use `RedisClient.set_job_status(job_id, status, result)` to update state.
-   - Store intermediate results in Redis or Supabase if needed.
-   - Expose REST endpoints that read the job state (see FastAPI guidelines above).
-
-4. **Retry & Timeouts**
-   - Configure per-task `autoretry_for`, `retry_backoff` to handle transient errors
-     (yfinance, Supabase network blips).
-   - Keep tasks idempotent; running the same job twice should not corrupt data.
+3. **Migration Process**
+   - Follow the pattern in `/docs/api/cloud-tasks-migration.md`.
+   - Create internal endpoint in `api/app/routers/internal.py`.
+   - Update public API to support both Cloud Tasks and Celery via feature flag.
 
 ## Redis Usage
 
@@ -95,7 +114,7 @@ Important entry points:
 2. **Key Patterns**
    - Caching: `cache:<key>` via `set_cache` / `get_cache`.
    - Sessions: `session:<id>` for auth tokens.
-   - Jobs: `job:<job_id>` – Celery/n8n job states.
+   - Jobs: `job:<job_id>` – Cloud Tasks/Celery/n8n job states.
    - Pub/Sub: channels like `job_status:<job_id>`, `price_update:<symbol>`.
 
 3. **Health Checks**
@@ -105,10 +124,10 @@ Important entry points:
 
 ## Universe & Market Data Jobs
 
-- **Daily ingestion**: `/api/v1/ingest/run-daily` (non-blocking). Populates InfluxDB
-  with 1m/5m/1d data for TSE Prime universe. Poll status via `/api/v1/ingest/jobs/{id}`.
+- **Daily ingestion**: `/api/v1/ingest/run-daily` (non-blocking). Now uses Cloud Tasks instead of Celery.
+  Populates InfluxDB with 1m/5m/1d data for TSE Prime universe. Poll status via `/api/v1/ingest/jobs/{id}`.
 - **Universe selection**: Implemented in `api/batch/pipeline/select_universe.py`.
-  Currently executed via CLI or n8n script. *FastAPI or Celery wrapper is still a TODO.*
+  Currently executed via CLI or n8n script. *Cloud Tasks wrapper is still a TODO.*
 - **Backtesting inputs**: Updated data feeds are now ready; sell/buy logic should call
   the ingestion job before running analysis.
 
@@ -121,10 +140,20 @@ Important entry points:
 
 ## Next Steps / TODOs
 
-- [ ] Expose universe-selection as a FastAPI async job endpoint.
-- [ ] Add Celery task wrappers for chart generation + technical analysis.
+- [x] Migrate ingestion jobs from Celery to Cloud Tasks.
+- [ ] Migrate universe-selection from CLI to Cloud Tasks FastAPI endpoint.
+- [ ] Migrate remaining Celery tasks (chart generation, technical analysis) to Cloud Tasks.
+- [ ] Remove legacy Celery infrastructure after all migrations complete.
 - [ ] Write docs in `docs/api/` detailing new endpoints and job flows.
 - [ ] Extend CLAUDE.md when new services (Backtest runner, AI decision service) are introduced.
+
+## Environment Variables
+
+Key environment variables for Cloud Tasks:
+- `USE_CLOUD_TASKS=true` - Enable Cloud Tasks instead of Celery
+- `GOOGLE_CLOUD_PROJECT=kaboom-472705` - GCP project ID
+- `CLOUD_TASKS_LOCATION=asia-northeast1` - Cloud Tasks region
+- `CLOUD_RUN_SERVICE_URL=https://api-xxxx-uc.a.run.app` - Cloud Run service URL
 
 Keep this guide updated whenever backend conventions change so assistants and
 engineers share the same workflow.
