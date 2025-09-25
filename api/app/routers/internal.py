@@ -80,6 +80,7 @@ async def execute_daily_ingest(
     Cloud Tasks から呼び出される日次インジェスト実行エンドポイント
 
     Cloud Tasksによって非同期で呼び出され、実際のデータインジェスト処理を実行します。
+    処理はバックグラウンドで実行され、Cloud Tasksには即座にレスポンスを返します。
     """
     # Cloud Tasks リクエスト検証
     await _verify_cloud_tasks_request(request)
@@ -110,7 +111,7 @@ async def execute_daily_ingest(
         )
         logger.info(f"[execute_daily_ingest] Job progress created for {job_id}")
 
-        # Step 2: 実行開始
+        # Step 2: 実行開始状態に更新
         logger.info(f"[execute_daily_ingest] Updating progress to RUNNING for {job_id}")
         await progress_service.update_progress(
             job_id=job_id,
@@ -120,50 +121,71 @@ async def execute_daily_ingest(
         )
         logger.info(f"[execute_daily_ingest] Progress updated to RUNNING for {job_id}")
 
-        # Step 3: 実際のデータ取得実行（同期処理）
-        def run_ingest_sync():
-            """同期的にインジェスト処理を実行"""
-            return run_daily_ingest(
-                interval_days=ingest_payload.interval_days,
-                market=ingest_payload.market,
-                symbols=ingest_payload.symbols,
-                chunk_size=ingest_payload.chunk_size,
-            )
+        # Step 3: バックグラウンドタスクを開始
+        async def run_background_ingest():
+            """バックグラウンドでインジェスト処理を実行"""
+            try:
+                # 進捗更新
+                await progress_service.update_progress(
+                    job_id=job_id,
+                    progress_percent=20.0,
+                    current_step="Executing data ingestion"
+                )
 
-        # 進捗更新
-        await progress_service.update_progress(
-            job_id=job_id,
-            progress_percent=20.0,
-            current_step="Executing data ingestion"
-        )
+                # 実際のデータ取得実行（同期処理）
+                def run_ingest_sync():
+                    """同期的にインジェスト処理を実行"""
+                    return run_daily_ingest(
+                        interval_days=ingest_payload.interval_days,
+                        market=ingest_payload.market,
+                        symbols=ingest_payload.symbols,
+                        chunk_size=ingest_payload.chunk_size,
+                    )
 
-        # インジェスト実行（CPUバウンドなタスクなので別スレッドで実行）
-        loop = asyncio.get_event_loop()
-        result = await loop.run_in_executor(None, run_ingest_sync)
+                # インジェスト実行（CPUバウンドなタスクなので別スレッドで実行）
+                loop = asyncio.get_event_loop()
+                result = await loop.run_in_executor(None, run_ingest_sync)
 
-        # Step 4: 完了処理
-        logger.info(f"[execute_daily_ingest] Setting job result to COMPLETED for {job_id}")
-        await progress_service.set_job_result(
-            job_id=job_id,
-            result_data=result,
-            status=JobStatus.COMPLETED
-        )
-        logger.info(f"[execute_daily_ingest] Job result set to COMPLETED for {job_id}")
+                # Step 4: 完了処理
+                logger.info(f"[execute_daily_ingest] Setting job result to COMPLETED for {job_id}")
+                await progress_service.set_job_result(
+                    job_id=job_id,
+                    result_data=result,
+                    status=JobStatus.COMPLETED
+                )
+                logger.info(f"[execute_daily_ingest] Job result set to COMPLETED for {job_id}")
 
-        logger.info(
-            f"[execute_daily_ingest] Completed job_id={job_id} "
-            f"result_keys={list(result.keys()) if isinstance(result, dict) else 'non-dict'}"
-        )
+                logger.info(
+                    f"[execute_daily_ingest] Completed job_id={job_id} "
+                    f"result_keys={list(result.keys()) if isinstance(result, dict) else 'non-dict'}"
+                )
 
+            except Exception as bg_error:
+                logger.error(f"[execute_daily_ingest] Background task failed for job_id={job_id}: {bg_error}", exc_info=True)
+
+                # エラー処理
+                try:
+                    await progress_service.set_job_error(
+                        job_id=job_id,
+                        error_message=str(bg_error),
+                        status=JobStatus.FAILED
+                    )
+                except Exception as progress_error:
+                    logger.error(f"Progress update failed: {progress_error}")
+
+        # バックグラウンドタスクを開始（非ブロッキング）
+        asyncio.create_task(run_background_ingest())
+
+        # Cloud Tasks に即座にレスポンスを返す
         return {
-            "status": "completed",
+            "status": "accepted",
             "job_id": job_id,
-            "completed_at": datetime.utcnow().isoformat(),
-            "result": result
+            "accepted_at": datetime.utcnow().isoformat(),
+            "message": "Job has been accepted and is running in background"
         }
 
     except Exception as e:
-        logger.error(f"[execute_daily_ingest] Failed job_id={job_id}: {e}", exc_info=True)
+        logger.error(f"[execute_daily_ingest] Setup failed for job_id={job_id}: {e}", exc_info=True)
 
         # エラー処理
         try:
