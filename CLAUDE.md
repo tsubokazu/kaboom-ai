@@ -144,8 +144,15 @@ Important entry points:
 - [ ] Migrate universe-selection from CLI to Cloud Tasks FastAPI endpoint.
 - [ ] Migrate remaining Celery tasks (chart generation, technical analysis) to Cloud Tasks.
 - [ ] Remove legacy Celery infrastructure after all migrations complete.
-- [ ] Write docs in `docs/api/` detailing new endpoints and job flows.
+- [x] Write docs in `docs/api/` detailing new endpoints and job flows.
 - [ ] Extend CLAUDE.md when new services (Backtest runner, AI decision service) are introduced.
+
+## Trading Decision API Reference
+
+Detailed API candidates and orchestration flows for the trading decision platform are
+documented in `docs/api/trading-decision-apis.md`. Review that file when implementing
+new routers, services, or batch jobs related to market data ingestion, signal
+production, portfolio management, or reporting.
 
 ## Environment Variables
 
