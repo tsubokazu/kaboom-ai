@@ -15,22 +15,13 @@ ROOT_DIR = Path(__file__).resolve().parents[2]
 if str(ROOT_DIR) not in sys.path:
     sys.path.append(str(ROOT_DIR))
 
-from batch.config.loader import load_env, load_influx_config, load_universe_settings
-from batch.pipeline.metrics import (
-    InfluxMarketDataClient,
-    MetricConfig,
-    SymbolMetrics,
-    calculate_symbol_metrics,
-    load_metric_config,
-)
-from batch.pipeline.score_universe import (
-    UniverseSettings,
-    calculate_scores,
-    load_sector_map,
-    load_universe_settings_struct,
-    select_universe,
-)
+from batch.config.loader import load_env, load_universe_settings
 from batch.pipeline.supabase_sector_loader import load_symbols_from_supabase
+from app.services.universe_selection_service import (
+    UniverseSelectionRequest,
+    UniverseSelectionService,
+    UniverseSelectionError,
+)
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
@@ -40,32 +31,6 @@ def load_symbols_from_csv(path: Path) -> List[str]:
     df = pd.read_csv(path)
     column = df.columns[0]
     return [str(value).strip() for value in df[column].dropna().unique()]
-
-
-def apply_hard_filters(
-    metrics: Dict[str, SymbolMetrics],
-    thresholds: Dict[str, float],
-) -> Dict[str, SymbolMetrics]:
-    filtered: Dict[str, SymbolMetrics] = {}
-    adv_min = float(thresholds.get("adv_jpy_min", 0))
-    price_min = float(thresholds.get("price_min", 0))
-    price_max = float(thresholds.get("price_max", float("inf")))
-    atr_min = float(thresholds.get("atr_pct_min", 0))
-    atr_max = float(thresholds.get("atr_pct_max", float("inf")))
-    zero_ratio_max = float(thresholds.get("zero_volume_ratio_max", 1))
-
-    for symbol, metric in metrics.items():
-        if metric.adv_jpy < adv_min:
-            continue
-        if not (price_min <= metric.latest_close <= price_max):
-            continue
-        if metric.atr_pct is None or not (atr_min <= metric.atr_pct <= atr_max):
-            continue
-        if metric.no_trade_5m_ratio > zero_ratio_max:
-            continue
-        filtered[symbol] = metric
-
-    return filtered
 
 
 def load_existing_list(path: Path) -> List[str]:
@@ -131,69 +96,66 @@ def main() -> None:
         load_env(args.env_file)
 
     settings_raw = load_universe_settings(args.settings)
-    metric_config = load_metric_config(settings_raw)
-    universe_settings = load_universe_settings_struct(settings_raw)
-    thresholds = settings_raw.get("thresholds", {})
-    output_cfg = settings_raw.get("output", {})
-
-    symbols: List[str] = []
-    if args.symbol_source == "supabase":
-        symbols = load_symbols_from_supabase(args.market)
-        if not symbols:
-            logger.warning("Supabaseから銘柄を取得できませんでした。CSVへフォールバックします")
-            symbols = load_symbols_from_csv(args.symbols)
-    else:
-        symbols = load_symbols_from_csv(args.symbols)
-
-    logger.info("loaded %d symbols", len(symbols))
-
-    influx_config = load_influx_config()
-
-    with InfluxMarketDataClient(influx_config) as client:
-        metrics = calculate_symbol_metrics(client, symbols, metric_config)
-
-    logger.info("calculated metrics for %d symbols", len(metrics))
-    metrics = apply_hard_filters(metrics, thresholds)
-    logger.info("after hard filters %d symbols remain", len(metrics))
-
-    if not metrics:
-        logger.error("no symbols passed hard filters")
-        return
-
-    scores, breakdown = calculate_scores(metrics, universe_settings.weights, metric_config)
-
-    sector_map = load_sector_map(universe_settings.sector_cap.definition_path)
-
-    existing_core = []
+    output_cfg = settings_raw.get(
+        "output",
+        {"core_list_path": "batch/data/core20.csv", "bench_list_path": "batch/data/bench5.csv"},
+    )
+    existing_core: List[str] = []
     core_path = Path(output_cfg.get("core_list_path", "batch/data/core20.csv"))
     if core_path.exists():
         existing_core = load_existing_list(core_path)
 
-    selection = select_universe(scores, universe_settings, existing_core, sector_map)
-
     bench_path = Path(output_cfg.get("bench_list_path", "batch/data/bench5.csv"))
-    save_list(core_path, selection["core"])
-    save_list(bench_path, selection["bench"])
+    symbols: List[str] = []
+    resolved_source = args.symbol_source
+    if args.symbol_source == "supabase":
+        symbols = load_symbols_from_supabase(args.market)
+        logger.info("loaded %d symbols from Supabase", len(symbols))
+        if not symbols:
+            logger.warning("Supabaseから銘柄を取得できませんでした。CSVへフォールバックします")
+            symbols = load_symbols_from_csv(args.symbols)
+            resolved_source = "list"
+    else:
+        symbols = load_symbols_from_csv(args.symbols)
+        resolved_source = "list"
 
-    snapshot_rows: List[Dict[str, object]] = []
-    for symbol, metric in metrics.items():
-        row = {
-            "symbol": symbol,
-            "latest_close": metric.latest_close,
-            "adv_jpy": metric.adv_jpy,
-            "atr_pct": metric.atr_pct,
-            "median_5m_range_bps": metric.median_5m_range_bps,
-            "close_5m_vol_share": metric.close_5m_vol_share,
-            "no_trade_5m_ratio": metric.no_trade_5m_ratio,
-            "score": scores.get(symbol, 0.0),
-            "score_total": breakdown.get(symbol, {}).get("total", scores.get(symbol, 0.0)),
-        }
-        row.update({f"score_{k}": v for k, v in breakdown.get(symbol, {}).items() if k != "total"})
-        snapshot_rows.append(row)
+    service = UniverseSelectionService()
+    request = UniverseSelectionRequest(
+        settings_path=args.settings,
+        market=args.market,
+        symbol_source=resolved_source,
+        symbols=symbols,
+        existing_core=existing_core,
+    )
 
-    save_snapshot(args.snapshot, snapshot_rows)
+    try:
+        result = service.run_selection(request)
+    except UniverseSelectionError as exc:
+        logger.error("universe selection failed: %s", exc)
+        return
 
-    print(json.dumps(selection, indent=2, ensure_ascii=False))
+    logger.info(
+        "metrics calculated for %d symbols → %d after filters",
+        result.total_symbols,
+        result.filtered_symbols,
+    )
+
+    save_list(core_path, result.core)
+    save_list(bench_path, result.bench)
+    save_snapshot(args.snapshot, result.snapshot_rows)
+
+    print(
+        json.dumps(
+            {
+                "core": result.core,
+                "bench": result.bench,
+                "total_symbols": result.total_symbols,
+                "filtered_symbols": result.filtered_symbols,
+            },
+            indent=2,
+            ensure_ascii=False,
+        )
+    )
 
 
 if __name__ == "__main__":
