@@ -74,3 +74,62 @@ KaboomのFastAPIコードベースを確認した上で、売買判断フロー�
 - [ ] ステップ2-4: 認証・n8n統合を共通ヘルパー化し、Cloud Tasks検証ロジックを再利用する。
 - [ ] ステップ3: テクニカル指標バッチAPIを整備し、キャッシュ／失敗ハンドリングを実装する。
 - [ ] ステップ4: チャート生成〜AI分析ジョブを段階的にCloud Tasksへ移行し、マルチステップ進捗管理を実現する。
+
+### ステップ2の詳細設計と着手順
+
+#### ステップ2-1 `/api/v1/universe/run-selection` の設計
+
+- **ルーター配置**: `api/app/routers/universe.py` を新設し、`APIRouter(prefix="/api/v1/universe", tags=["Universe"])` を宣言。`api/app/routers/__init__.py` と `app/main.py` でルーター登録を行う。インジェストAPIと同様に `settings.USE_CLOUD_TASKS` のフラグで同期実行フォールバックを切り替える。
+- **リクエストモデル**: `UniverseSelectionRequestBody`（Pydantic）を定義し、以下を受け取る。
+  - `market`: 省略時 `"TSE_PRIME"`。
+  - `symbols`: 任意の明示リスト。指定時はSupabaseクエリをスキップ。
+  - `existing_core`: 直近のコア銘柄リスト。
+  - `thresholds_override`: 閾値上書き辞書。
+  - `settings_path`: CLIと同じ設定YAMLへの相対パス（デフォルトは `batch/config/universe.yml`）。
+- **レスポンスモデル**: `UniverseSelectionJobResponse` として `job_id` / `status` / `requested_at` を返す。Cloud Tasks無効時は `result_preview` として `core` / `bench` の先頭数件を含める形で同期レスポンスを返し、フロント/オペレーションからの即時検証を可能にする。
+- **Cloud Tasks投入処理**:
+  - `CloudTasksClient.enqueue_http_task` を利用し、`/internal/universe/run-selection` にPOST。payloadは `job_id`・`created_at`・`payload`（内部用パラメータ）をラップした `CloudTaskPayload` 形式に揃える。
+  - `payload` 内には UniverseSelectionService へ渡す `settings_path` / `market` / `symbols` / `existing_core` / `thresholds_override` を含む。`executor="cloud_tasks"` を明示してJobProgressServiceでの判定に使う。
+  - Redisの `universe:job:<job_id>` へ依頼メタデータを保存するためのヘルパー（`_store_universe_job_metadata`）を実装し、`JobProgressService.create_job` で `job_type="universe_selection"` を設定する。
+
+#### ステップ2-2 `/internal/universe/run-selection` の実装方針
+
+- **共通ペイロードスキーマ**: `CloudTaskPayload` と対になる `UniverseSelectionTaskPayload` を `internal.py` に定義。`settings_path` などは `UniverseSelectionService.UniverseSelectionRequest` へそのまま渡せるキーにする。
+- **処理フロー**:
+  1. `_verify_cloud_tasks_request` を再利用（後述のヘルパー化の対象）。
+  2. `JobProgressService.create_job` → `status=RUNNING` 更新までは日次インジェストの流れを踏襲。`total_steps` は暫定で `5`（`symbol_load`/`metrics`/`filter`/`scoring`/`persist`）としておき、各段階で `progress_percent` と `current_step` を更新する。
+  3. `UniverseSelectionService.run_selection` を同期I/Oとして実行するため、`BackgroundTasks` + `asyncio.to_thread`（または `run_in_executor`）でCPUバウンド処理を隔離する。
+  4. 成功時は `set_job_result` に以下の構造体を保存。
+     ```json
+     {
+       "core": ["6501", "6594", ...],
+       "bench": ["7203", ...],
+       "snapshot_uri": "gs://kaboom-universe/2024-09-12/core.csv",
+       "statistics": {
+         "total_symbols": 742,
+         "filtered_symbols": 136,
+         "applied_thresholds": {"adv_jpy_min": 3.5e7, ...}
+       }
+     }
+     ```
+  5. 失敗時は `UniverseSelectionError` を捕捉して `set_job_error`。例外メッセージと `failed_step`（最後に更新した `current_step`）をエラー詳細に含める。
+- **ロギング**: `logger = logging.getLogger("app.routers.universe")` を使用し、`job_id` と `current_step` を各ログ行に含める。n8n側のトラッキングで利用できるよう `progress_service.publish_status` も忘れず呼ぶ。
+
+#### ステップ2-3 ストレージおよびメタデータ保存
+
+- **出力ファイル構造**:
+  - `gs://<bucket>/universe/{job_id}/core.csv`
+  - `gs://<bucket>/universe/{job_id}/bench.csv`
+  - `gs://<bucket>/universe/{job_id}/snapshot.parquet`
+  - Supabaseテーブル `universe_snapshots` にも `job_id` / `core_count` / `bench_count` / `created_at` を保存（後続のダッシュボード向け）。
+- **保存ユーティリティ**: `api/app/services/storage.py`（新設）に `store_universe_snapshot(result: UniverseSelectionResult, job_id: str) -> StoredUniverseArtifacts` を実装。GCSクライアントは `google.cloud.storage`、Supabaseは既存の `SupabaseClient` を利用。テストでは `LocalFileSystem` と `fakeredis` を使って代替。
+- **JobProgressServiceメタデータ**: `set_job_result` の `result_data` に GCS URI / SupabaseレコードID を含め、`metadata` フィールドには `market` / `symbols_count` / `executor` / `artifact_bucket` などを保持する。
+
+#### ステップ2-4 認証とn8n統合
+
+- `_verify_cloud_tasks_request` を `api/app/routers/internal_common.py`（仮称）へ切り出し、インジェストとユニバース両タスクからインポートする。将来的に `X-Internal-Token` のバリデーションやプロジェクトIDチェックを追加しても一箇所で済むようにする。
+- `settings.UNIVERSE_API_TOKEN` を追加し、パブリックAPIで `X-Universe-Token` ヘッダーを必須化。n8nのHTTP Nodeから付与する形に変更。
+- Job進捗のポーリングは既存の `/api/v1/jobs/{job_id}` を活用する想定だが、n8nから参照する際に必要な `job_type=universe_selection` でのフィルタリングAPIが無いため、`/api/v1/jobs` のクエリパラメータに `job_type` を追加するタスクを別途Issue化する。
+- ドキュメント整備: n8n向けRunbook（`docs/automation/universe-selection.md`）を作成し、HTTPノード設定例とトークン管理ポリシーを記載する。ステップ2完了のDefinition of Doneに含める。
+
+> 上記4項目が完了すると、ユニバース選定が日次インジェストと同じ非同期ジョブ基盤で運用できるようになる。以降のステップ3/4ではここで得た成果物（GCS URIやSupabaseレコード）を前提にテクニカル指標計算やAI分析を順次拡張していく。
