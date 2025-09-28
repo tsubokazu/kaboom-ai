@@ -20,6 +20,24 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        working-directory: api
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest pytest-asyncio
+
+      - name: Run unit tests
+        working-directory: api
+        env:
+          PYTHONPATH: ${{ github.workspace }}/api
+        run: pytest tests
+
       - name: Authenticate with Google Cloud
         uses: google-github-actions/auth@v2
         with:
