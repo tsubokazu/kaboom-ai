@@ -28,7 +28,7 @@ KaboomのFastAPIコードベースを確認した上で、売買判断フロー�
 
 1. **UniverseSelectionServiceの新設**: `select_universe.py` のロジックからI/Oを分離し、引数で対象銘柄や設定を受け取り結果オブジェクトを返すよう実装する。
 2. **CLIの移行**: 既存CLIをサービス層経由で動かすようリファクタリングし、CSV入出力だけを担う薄いラッパーへ置き換える。
-3. **テスト可能な構造の確立**: 上記サービスに対するユニットテスト（モック済みのInflux/Supabaseクライアント）を追加し、将来のAPI実装でも流用できるフィクスチャを用意する。
+3. **テスト可能な構造の確立**: 上記サービスに対するユニットテスト（モック済みのInflux/Supabaseクライアント）を追加し、将来のAPI実装でも流用できるフィクスチャを用意する。UniverseSelectionService向けのテストは `api/tests/services/test_universe_selection_service.py` として整備済みで、Cloud Tasks連携の正常系と検証パスをカバーしている。
 
 ### ステップ2: ユニバース選定ジョブのCloud Tasks化
 
@@ -57,7 +57,7 @@ KaboomのFastAPIコードベースを確認した上で、売買判断フロー�
 
 - **ジョブ進捗サービスの共通化**: `internal.py` のCloud Tasksリクエスト検証ロジックをヘルパー化し、ユニバース選定・チャート生成などでも再利用する。エラー時の`set_job_error`呼び出しや例外の扱いを統一する。
 - **設定・シークレット管理**: ユニバース選定で参照するSupabase/Influx設定、チャート生成で使う外部APIキーなど、`.env`のキー名と設定クラスへの追加を洗い出す。
-- **テスト計画**: サービス層を先に切り出すことで、FastAPIルーターを介さないユニットテスト（pytest + async）を記述しやすくする。Cloud Tasksのキュー投入は`USE_CLOUD_TASKS=false`時に同期実行へフォールバックできるようにしておく。
+- **テスト計画**: サービス層を先に切り出すことで、FastAPIルーターを介さないユニットテスト（pytest + async）を記述しやすくする。Cloud Tasksのキュー投入は`USE_CLOUD_TASKS=false`時に同期実行へフォールバックできるようにしておく。GitHub Actionsの`Run API tests`ワークフローでPR時にpytestが自動実行され、ユニバース選定サービスのテストが常に検証されるようになった。
 
 ---
 
@@ -67,7 +67,7 @@ KaboomのFastAPIコードベースを確認した上で、売買判断フロー�
 
 - [x] ステップ1-1: UniverseSelectionServiceを追加し、CLIロジックからビジネス処理を分離する。
 - [x] ステップ1-2: CLIを新サービス経由で実行するようリファクタリングし、CSV入出力処理を薄く保つ。
-- [ ] ステップ1-3: UniverseSelectionServiceのユニットテストを追加して主要パスを検証する。
+- [x] ステップ1-3: UniverseSelectionServiceのユニットテストを追加して主要パスを検証する（Cloud Tasks投入の正常系と入力バリデーション、設定エラーを含む）。
 - [ ] ステップ2-1: `/api/v1/universe/run-selection` を実装してCloud Tasksへジョブを投入する。
 - [ ] ステップ2-2: `/internal/universe/run-selection` を実装し、JobProgressServiceとの連携を整える。
 - [ ] ステップ2-3: Universe選定結果のストレージ設計とジョブ結果メタデータの保存を行う。
